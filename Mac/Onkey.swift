@@ -252,6 +252,27 @@ enum Key {
     static let savedX = "savedX", savedY = "savedY"
 }
 
+// Settings read once whenever one changes, instead of from UserDefaults on every tick
+// (those reads were the single biggest cost with many Onkeys).
+struct Prefs {
+    var zone = "anywhere", chase = 5, speed = 42.0
+    var soundOn = true, soundGap = 90.0, volume = 1.0
+    var size: CGFloat = 1, watchCursor = true, blink = true
+
+    init() {}
+    init(_ d: UserDefaults) {
+        zone = d.string(forKey: Key.zone) ?? "anywhere"
+        chase = d.integer(forKey: Key.chase)
+        speed = d.double(forKey: Key.speed)
+        soundOn = d.bool(forKey: Key.soundOn)
+        soundGap = d.double(forKey: Key.soundGap)
+        volume = d.double(forKey: Key.volume)
+        size = CGFloat(d.double(forKey: Key.size))
+        watchCursor = d.bool(forKey: Key.watchCursor)
+        blink = d.bool(forKey: Key.blink)
+    }
+}
+
 private final class OptionTag: NSObject {
     let key: String, value: NSObject
     init(_ key: String, _ value: NSObject) { self.key = key; self.value = value }
@@ -490,6 +511,10 @@ final class Pet {
     private(set) var dragging = false
     private var shown: CGImage?
     private var shownBounce: CGFloat = 0
+    private var shownOrigin: NSPoint?
+    // What the eyes and mouth last showed, so unchanged ones aren't redrawn every tick.
+    private var shownPupils: [CGPoint]?
+    private var lidsShown = true, mouthShown = true
     private var gaze: [CGPoint] = [.zero, .zero]   // Pupil offsets in sprite pixels, y-down.
     private var blinkStart = -1.0, nextBlink = ProcessInfo.processInfo.systemUptime + Double.random(in: 2...8)
     // Each Onkey has his own copy of the sound so several can "oooo" at once.
@@ -520,6 +545,7 @@ final class Pet {
             self.dragging = true
             self.px = origin.x; self.py = origin.y
             self.window.setFrameOrigin(origin)
+            self.shownOrigin = origin
         }
         view.onDragEnd = { [weak self] in
             guard let self else { return }
@@ -559,6 +585,7 @@ final class Pet {
         let center = NSPoint(x: px + Double(oldSize.width) / 2, y: py + Double(oldSize.height) / 2)
         window.setContentSize(windowSize)
         view.frame = NSRect(origin: .zero, size: windowSize)
+        forgetShown()
         px = center.x - windowSize.width / 2
         py = center.y - windowSize.height / 2
         clampToArea()
@@ -566,7 +593,10 @@ final class Pet {
         present(app.idle)
     }
 
-    func framesChanged() { shown = nil; present(app.idle) }
+    func framesChanged() { shown = nil; forgetShown(); present(app.idle) }
+
+    // Makes the next tick redraw everything, e.g. after a resize or a drag.
+    private func forgetShown() { shownOrigin = nil; shownPupils = nil; lidsShown = true; mouthShown = true }
 
     // MARK: Movement
 
@@ -589,10 +619,10 @@ final class Pet {
 
     func pickTarget() {
         let l = limits
-        let zone = app.defaults.string(forKey: Key.zone) ?? "anywhere"
+        let zone = app.prefs.zone
         if zone == "stay" { targetX = px; targetY = py; return }
         var x = Double.random(in: l.minX...l.maxX), y = Double.random(in: l.minY...l.maxY)
-        let chase = app.defaults.integer(forKey: Key.chase)
+        let chase = app.prefs.chase
         let mouse = NSEvent.mouseLocation
         if chase > 0 && Int.random(in: 0..<chase) == 0 && area.contains(mouse) {
             x = min(l.maxX, max(l.minX, mouse.x - windowSize.width / 2))
@@ -614,7 +644,7 @@ final class Pet {
     func walk(dt: Double) {
         let clock = app.clock
         if clock >= nextSound { playSound(force: false); nextSound = clock + soundDelay() }
-        if clock < restUntil || app.defaults.string(forKey: Key.zone) == "stay" { present(app.idle); return }
+        if clock < restUntil || app.prefs.zone == "stay" { present(app.idle); return }
         let dx = targetX - px, dy = targetY - py
         let distance = (dx * dx + dy * dy).squareRoot()
         if distance < 3 {
@@ -623,7 +653,7 @@ final class Pet {
             present(app.idle)
             return
         }
-        let speed = app.defaults.double(forKey: Key.speed) * Double(size)
+        let speed = app.prefs.speed * Double(size)
         let step = min(distance, speed * dt)
         px += step * dx / distance
         py += step * dy / distance
@@ -639,7 +669,8 @@ final class Pet {
     func present(_ image: CGImage, bounce: CGFloat = 0) {
         if shown !== image { view.show(image, scale: app.pixelScale / size); shown = image }
         shownBounce = bounce
-        window.setFrameOrigin(NSPoint(x: px.rounded(), y: py.rounded()))
+        let origin = NSPoint(x: px.rounded(), y: py.rounded())
+        if origin != shownOrigin { window.setFrameOrigin(origin); shownOrigin = origin }
     }
 
     // MARK: Eyes, eyelids and mouth
@@ -656,7 +687,10 @@ final class Pet {
             - OnkeyRenderer.canvasPoint(.zero, bounce: 0).x) * size
         updateLids(pointsPerPixel: pointsPerPixel)
         updateMouth(dt: dt)
-        guard app.watching else { view.showPupils([], at: nil, pointsPerPixel: 0, contentsScale: 1); return }
+        guard app.watching else {
+            if shownPupils != [] { view.showPupils([], at: nil, pointsPerPixel: 0, contentsScale: 1); shownPupils = [] }
+            return
+        }
         let mouse = NSEvent.mouseLocation
         let origin = window.frame.origin
         let ease = CGFloat(1 - exp(-dt * 14))
@@ -673,6 +707,10 @@ final class Pet {
             gaze[i].y += (target.y - gaze[i].y) * ease
             centers.append(eyePoint(eye, offset: gaze[i]))
         }
+        // Resting Onkeys with a still cursor have nothing new to show.
+        if let last = shownPupils, last.count == centers.count,
+           zip(last, centers).allSatisfy({ abs($0.x - $1.x) < 0.01 && abs($0.y - $1.y) < 0.01 }) { return }
+        shownPupils = centers
         view.showPupils(app.renderer.pupils, at: centers, pointsPerPixel: pointsPerPixel,
                         contentsScale: 1 / pointsPerPixel)
     }
@@ -684,10 +722,12 @@ final class Pet {
 
     private func updateLids(pointsPerPixel k: CGFloat) {
         let now = ProcessInfo.processInfo.systemUptime
-        if app.defaults.bool(forKey: Key.blink) && now >= nextBlink {
+        if app.prefs.blink && now >= nextBlink {
             blinkStart = now
             nextBlink = now + 6 + Double.random(in: 0...8)
         }
+        // Between blinks (nearly all the time) the lids stay hidden and need no work.
+        if now - blinkStart > 0.5 && !lidsShown { return }
         var closure: [CGFloat] = []
         var frames: [CGRect] = []
         for (i, interior) in app.renderer.eyeInteriors.enumerated() {
@@ -708,6 +748,7 @@ final class Pet {
         }
         view.showLids(app.renderer.eyeInteriors, frames: frames, closure: closure,
                       color: app.renderer.lidColor, pointsPerPixel: k)
+        lidsShown = closure.contains { $0 > 0.01 }
     }
 
     // Opens his mouth "just a tad", following how loud the clip is at this moment.
@@ -718,6 +759,8 @@ final class Pet {
         let playing = t >= 0 && t < Double(envelope.count) / 60
         let target = playing ? min(1, envelope[Int(t * 60)] * 1.25) : 0
         mouthOpen += (target - mouthOpen) * (1 - exp(-dt * 25))
+        if mouthOpen <= 0.02 && !mouthShown { return }
+        mouthShown = mouthOpen > 0.02
         let s0 = OnkeyRenderer.canvasPoint(CGPoint(x: 1, y: 0), bounce: 0).x - OnkeyRenderer.canvasPoint(.zero, bounce: 0).x
         let origin = OnkeyRenderer.canvasPoint(.zero, bounce: shownBounce)
         // Sprite pixels (y-down) to view points (y-up), following his head's bounce.
@@ -729,13 +772,13 @@ final class Pet {
     // MARK: Sound
 
     private func soundDelay() -> Double {
-        let gap = app.defaults.double(forKey: Key.soundGap)
+        let gap = app.prefs.soundGap
         return gap + Double.random(in: 0...gap)
     }
 
     func playSound(force: Bool) {
-        guard let sound, force || app.defaults.bool(forKey: Key.soundOn) else { return }
-        sound.volume = Float(app.defaults.double(forKey: Key.volume))
+        guard let sound, force || app.prefs.soundOn else { return }
+        sound.volume = Float(app.prefs.volume)
         sound.stop()
         sound.play()
         soundStart = ProcessInfo.processInfo.systemUptime
@@ -768,9 +811,10 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
     private(set) var clock = 0.0
     private var lastTick = 0.0
     private var paused = false
-    var watching: Bool { defaults.bool(forKey: Key.watchCursor) }
+    private(set) var prefs = Prefs()
+    var watching: Bool { prefs.watchCursor }
 
-    var size: CGFloat { CGFloat(defaults.double(forKey: Key.size)) }
+    var size: CGFloat { prefs.size }
     var windowSize: NSSize {
         NSSize(width: OnkeyRenderer.canvas.width * size, height: OnkeyRenderer.canvas.height * size)
     }
@@ -782,6 +826,7 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
             Key.size: 1.0, Key.opacity: 1.0, Key.layer: "above", Key.draggable: false, Key.watchCursor: true, Key.blink: true,
             Key.count: 1,
         ])
+        prefs = Prefs(defaults)
         let folder = Self.assetFolder()
         guard let r = OnkeyRenderer(spriteURL: folder.appendingPathComponent("Onkey.png")) else {
             fail("Could not load Onkey.png from \(folder.path).")
@@ -812,6 +857,7 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
 
         lastTick = ProcessInfo.processInfo.systemUptime
         let t = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in self?.tick() }
+        t.tolerance = 1.0 / 120   // Lets macOS line the ticks up with other work to save power.
         RunLoop.main.add(t, forMode: .common)
         timer = t
     }
@@ -1017,6 +1063,7 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
         } else {
             defaults.set(tag.value, forKey: tag.key)
         }
+        prefs = Prefs(defaults)
         switch tag.key {
         case Key.count:
             matchPetCount()
@@ -1061,10 +1108,14 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
         let dt = min(0.08, max(0, now - lastTick))
         lastTick = now
         if !paused { clock += dt }
+        // One Core Animation commit for every Onkey's changes, rather than one each.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
         for pet in pets {
             if !paused && !pet.dragging { pet.walk(dt: dt) }
             pet.updateFace(dt: dt)
         }
+        CATransaction.commit()
     }
 
     private func screensChanged() {

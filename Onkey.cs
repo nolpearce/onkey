@@ -496,6 +496,8 @@ namespace OnkeyDesktopPet
     internal sealed class Settings
     {
         private readonly Dictionary<string, string> values = new Dictionary<string, string>();
+        // Parsed once when set, since the Onkeys read these every tick.
+        private readonly Dictionary<string, double> numbers = new Dictionary<string, double>();
         private readonly string path;
 
         public Settings()
@@ -512,19 +514,22 @@ namespace OnkeyDesktopPet
         private void Parse(string line)
         {
             int eq = line.IndexOf('=');
-            if (eq > 0) values[line.Substring(0, eq).Trim()] = line.Substring(eq + 1).Trim();
+            if (eq > 0) Store(line.Substring(0, eq).Trim(), line.Substring(eq + 1).Trim());
+        }
+
+        private void Store(string key, string value)
+        {
+            values[key] = value;
+            double v;
+            numbers[key] = double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out v) ? v : 0;
         }
 
         public string Get(string key) { string v; return values.TryGetValue(key, out v) ? v : ""; }
         public bool Has(string key) { return values.ContainsKey(key); }
         public bool Bool(string key) { return Get(key) == "true"; }
-        public double Number(string key)
-        {
-            double v;
-            return double.TryParse(Get(key), NumberStyles.Float, CultureInfo.InvariantCulture, out v) ? v : 0;
-        }
+        public double Number(string key) { double v; return numbers.TryGetValue(key, out v) ? v : 0; }
 
-        public void Set(string key, string value) { values[key] = value; Save(); }
+        public void Set(string key, string value) { Store(key, value); Save(); }
         public void Set(string key, double value) { Set(key, value.ToString("R", CultureInfo.InvariantCulture)); }
 
         public void Save()
@@ -636,6 +641,7 @@ namespace OnkeyDesktopPet
         private ToolStripMenuItem pauseItem, loginItem;
         private float dpi = 1;
         private double lastTick;
+        private int tickCount;
         private bool exiting;
 
         public float PixelScale { get { return (float)Settings.Number("size") * dpi; } }   // Pixels per canvas point.
@@ -938,7 +944,8 @@ namespace OnkeyDesktopPet
             double dt = Math.Min(0.08, Math.Max(0, now - lastTick));
             lastTick = now;
             if (!Paused) Clock += dt;
-            bool desktop = Settings.Get("layer") == "desktop";
+            // Keeping desktop-layer Onkeys behind other windows only needs doing now and then.
+            bool desktop = Settings.Get("layer") == "desktop" && ++tickCount % 15 == 0;
             foreach (PetForm pet in pets.ToArray())
             {
                 if (!Paused && !pet.Dragging) pet.Walk(dt);
@@ -1068,8 +1075,14 @@ namespace OnkeyDesktopPet
         private double blinkStart = -100, nextBlink, mouthOpen;
         public double SoundStart = double.NegativeInfinity;
         private readonly PointF[] gaze = new PointF[2];
-        private Bitmap work, current;
+        private Bitmap current;
         private float currentBounce;
+        private int canvasWidth, canvasHeight;   // Window size in pixels.
+        // What's on screen now, so unchanged frames are skipped (resting Onkeys cost nothing).
+        private Bitmap shownFrame;
+        private int shownX = int.MinValue, shownY, shownGaze0X, shownGaze0Y, shownGaze1X, shownGaze1Y, shownLid0, shownLid1, shownMouth;
+        private byte shownAlpha;
+        private bool redraw = true;
         private LayeredSurface surface;
         private bool dragging, dragMoved, closed;
         private Point grabMouse;
@@ -1123,12 +1136,12 @@ namespace OnkeyDesktopPet
         // New frames (a new size, or eyes switched): a canvas and surface to match.
         public void FramesChanged()
         {
-            if (work != null) work.Dispose();
-            work = new Bitmap(app.Idle.Width, app.Idle.Height, PixelFormat.Format32bppPArgb);
+            canvasWidth = app.Idle.Width; canvasHeight = app.Idle.Height;
             current = app.Idle; currentBounce = 0;
-            ClientSize = new System.Drawing.Size(work.Width, work.Height);
+            ClientSize = new System.Drawing.Size(canvasWidth, canvasHeight);
             if (surface != null) { surface.Dispose(); surface = null; }
-            if (IsHandleCreated) surface = new LayeredSurface(work.Width, work.Height);
+            if (IsHandleCreated) surface = new LayeredSurface(canvasWidth, canvasHeight);
+            redraw = true;
         }
 
         public void ApplyAppearance()
@@ -1140,8 +1153,9 @@ namespace OnkeyDesktopPet
                 int style = Native.GetWindowLong(Handle, -20);
                 style = app.Settings.Bool("draggable") ? style & ~0x20 : style | 0x20;
                 Native.SetWindowLong(Handle, -20, style);
-                if (surface == null) surface = new LayeredSurface(work.Width, work.Height);
+                if (surface == null) surface = new LayeredSurface(canvasWidth, canvasHeight);
             }
+            redraw = true;
         }
 
         public void SendToBottom()
@@ -1152,8 +1166,8 @@ namespace OnkeyDesktopPet
         // After a size change: keep him centred where he was, at the new size.
         public void Resized(int oldWidth, int oldHeight)
         {
-            px += (oldWidth - work.Width) / 2.0;
-            py += (oldHeight - work.Height) / 2.0;
+            px += (oldWidth - canvasWidth) / 2.0;
+            py += (oldHeight - canvasHeight) / 2.0;
             ClampToArea();
             PickTarget();
         }
@@ -1173,7 +1187,7 @@ namespace OnkeyDesktopPet
 
         public void ScreensChanged()
         {
-            Area = Screen.FromPoint(new Point((int)px + work.Width / 2, (int)py + work.Height / 2)).WorkingArea;
+            Area = Screen.FromPoint(new Point((int)px + canvasWidth / 2, (int)py + canvasHeight / 2)).WorkingArea;
             ClampToArea();
             PickTarget();
         }
@@ -1211,8 +1225,8 @@ namespace OnkeyDesktopPet
             Point mouse = Cursor.Position;
             if (chase > 0 && app.Random.Next(chase) == 0 && Area.Contains(mouse))
             {
-                x = Math.Min(maxX, Math.Max(minX, mouse.X - work.Width / 2.0));
-                y = Math.Min(maxY, Math.Max(minY, mouse.Y - work.Height / 2.0));
+                x = Math.Min(maxX, Math.Max(minX, mouse.X - canvasWidth / 2.0));
+                y = Math.Min(maxY, Math.Max(minY, mouse.Y - canvasHeight / 2.0));
             }
             if (zone == "bottom") y = maxY;
             else if (zone == "top") y = minY;
@@ -1293,7 +1307,26 @@ namespace OnkeyDesktopPet
         public void Present()
         {
             if (closed || surface == null || current == null) return;
-            using (Graphics g = Graphics.FromImage(work))
+            int x = (int)Math.Round(px), y = (int)Math.Round(py);
+            byte alpha = (byte)Math.Max(0, Math.Min(255, app.Settings.Number("opacity") * 255));
+            // Everything that affects the picture, rounded to what could visibly change it.
+            bool watching = app.Watching;
+            int g0x = watching ? (int)Math.Round(gaze[0].X * 4) : 0, g0y = watching ? (int)Math.Round(gaze[0].Y * 4) : 0;
+            int g1x = watching ? (int)Math.Round(gaze[1].X * 4) : 0, g1y = watching ? (int)Math.Round(gaze[1].Y * 4) : 0;
+            int lid0 = (int)Math.Round(Closure(0) * 100), lid1 = (int)Math.Round(Closure(1) * 100);
+            int mouth = mouthOpen <= 0.02 ? 0 : (int)Math.Round(mouthOpen * 100);
+            bool same = !redraw && current == shownFrame && alpha == shownAlpha
+                && g0x == shownGaze0X && g0y == shownGaze0Y && g1x == shownGaze1X && g1y == shownGaze1Y
+                && lid0 == shownLid0 && lid1 == shownLid1 && mouth == shownMouth;
+            if (same)
+            {
+                // Same picture: at most slide the window, which needs no redraw.
+                if (x != shownX || y != shownY)
+                    Native.SetWindowPos(Handle, IntPtr.Zero, x, y, 0, 0, 0x0001 | 0x0004 | 0x0010);   // No size, z-order or activation change.
+                shownX = x; shownY = y;
+                return;
+            }
+            using (Graphics g = Graphics.FromImage(surface.Canvas))
             {
                 g.CompositingMode = CompositingMode.SourceCopy;
                 g.DrawImage(current, new Rectangle(0, 0, current.Width, current.Height));
@@ -1314,8 +1347,11 @@ namespace OnkeyDesktopPet
                 for (int i = 0; i < 2; i++) Features.DrawLid(g, app.Renderer.EyeInteriors[i], Closure(i), app.Renderer.LidColor, i);
                 Features.DrawMouth(g, (float)mouthOpen);
             }
-            byte alpha = (byte)Math.Max(0, Math.Min(255, app.Settings.Number("opacity") * 255));
-            surface.Show(Handle, work, (int)Math.Round(px), (int)Math.Round(py), alpha);
+            surface.Show(Handle, x, y, alpha);
+            shownFrame = current; shownAlpha = alpha; shownX = x; shownY = y;
+            shownGaze0X = g0x; shownGaze0Y = g0y; shownGaze1X = g1x; shownGaze1Y = g1y;
+            shownLid0 = lid0; shownLid1 = lid1; shownMouth = mouth;
+            redraw = false;
         }
 
         // Dragging (when "Let me drag Onkey around" is ticked)
@@ -1357,48 +1393,45 @@ namespace OnkeyDesktopPet
             {
                 closed = true;
                 if (surface != null) surface.Dispose();
-                if (work != null) work.Dispose();
             }
             base.OnFormClosed(e);
         }
     }
 
-    // One reusable 32-bit DIB. Alpha is premultiplied before Windows composites it.
+    // One reusable 32-bit DIB that Windows composites from, premultiplied alpha. Canvas is a
+    // GDI+ view of the DIB's own memory, so frames are drawn straight into what Windows
+    // shows, with no copying in between.
     internal sealed class LayeredSurface : IDisposable
     {
         private IntPtr memoryDC, bitmap, previousBitmap, pixels;
         private readonly int width, height;
-        private readonly byte[] buffer;
+        public Bitmap Canvas;
 
         public LayeredSurface(int w, int h)
         {
-            width = w; height = h; buffer = new byte[w * h * 4];
+            width = w; height = h;
             IntPtr screenDC = Native.GetDC(IntPtr.Zero);
             try
             {
                 memoryDC = Native.CreateCompatibleDC(screenDC);
                 Native.BitmapInfo info = new Native.BitmapInfo();
                 info.HeaderSize = (uint)Marshal.SizeOf(typeof(Native.BitmapInfo));
-                info.Width = w; info.Height = -h;
-                info.Planes = 1; info.BitCount = 32; info.SizeImage = (uint)buffer.Length;
+                info.Width = w; info.Height = -h;   // Negative: rows run top-down, as GDI+ expects.
+                info.Planes = 1; info.BitCount = 32; info.SizeImage = (uint)(w * h * 4);
                 bitmap = Native.CreateDIBSection(screenDC, ref info, 0, out pixels, IntPtr.Zero, 0);
                 if (memoryDC == IntPtr.Zero || bitmap == IntPtr.Zero)
                     throw new Win32Exception(Marshal.GetLastWin32Error());
                 previousBitmap = Native.SelectObject(memoryDC, bitmap);
+                Canvas = new Bitmap(w, h, w * 4, PixelFormat.Format32bppPArgb, pixels);
             }
             catch { Dispose(); throw; }
             finally { if (screenDC != IntPtr.Zero) Native.ReleaseDC(IntPtr.Zero, screenDC); }
         }
-        public void Show(IntPtr window, Bitmap frame, int x, int y, byte opacity)
+
+        // Hands what's been drawn on Canvas to Windows, at (x, y).
+        public void Show(IntPtr window, int x, int y, byte opacity)
         {
-            BitmapData data = frame.LockBits(new Rectangle(0, 0, width, height), ImageLockMode.ReadOnly, PixelFormat.Format32bppPArgb);
-            try
-            {
-                for (int row = 0; row < height; row++)
-                    Marshal.Copy(IntPtr.Add(data.Scan0, row * data.Stride), buffer, row * width * 4, width * 4);
-            }
-            finally { frame.UnlockBits(data); }
-            Marshal.Copy(buffer, 0, pixels, buffer.Length);
+            Native.GdiFlush();
             Native.Point position = new Native.Point(x, y);
             Native.Point origin = new Native.Point(0, 0);
             Native.Size size = new Native.Size(width, height);
@@ -1407,8 +1440,10 @@ namespace OnkeyDesktopPet
             if (!Native.UpdateLayeredWindow(window, IntPtr.Zero, ref position, ref size, memoryDC, ref origin, 0, ref blend, 2))
                 throw new Win32Exception(Marshal.GetLastWin32Error());
         }
+
         public void Dispose()
         {
+            if (Canvas != null) { Canvas.Dispose(); Canvas = null; }
             if (previousBitmap != IntPtr.Zero && memoryDC != IntPtr.Zero) Native.SelectObject(memoryDC, previousBitmap);
             if (bitmap != IntPtr.Zero) { Native.DeleteObject(bitmap); bitmap = IntPtr.Zero; }
             if (memoryDC != IntPtr.Zero) { Native.DeleteDC(memoryDC); memoryDC = IntPtr.Zero; }
@@ -1433,6 +1468,7 @@ namespace OnkeyDesktopPet
         [DllImport("user32.dll")] internal static extern int SetWindowLong(IntPtr window, int index, int value);
         [DllImport("user32.dll")] internal static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int cx, int cy, uint flags);
         [DllImport("user32.dll")] internal static extern bool DestroyIcon(IntPtr icon);
+        [DllImport("gdi32.dll")] internal static extern bool GdiFlush();
         [DllImport("gdi32.dll", SetLastError = true)] internal static extern IntPtr CreateCompatibleDC(IntPtr dc);
         [DllImport("gdi32.dll", SetLastError = true)] internal static extern IntPtr CreateDIBSection(IntPtr dc, ref BitmapInfo info, uint usage, out IntPtr pixels, IntPtr section, uint offset);
         [DllImport("gdi32.dll")] internal static extern IntPtr SelectObject(IntPtr dc, IntPtr obj);
