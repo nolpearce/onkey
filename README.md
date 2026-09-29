@@ -14,6 +14,7 @@ Needs the Xcode Command Line Tools (`xcode-select --install`).
 
 This builds `Onkey.app`, installs it in `/Applications` and launches it. Click the Onkey head in the menu bar to:
 
+- **How Many Onkeys**: one, two, three, five, or ten (chaos), each wandering on his own
 - **Where Onkey Goes**: anywhere, along an edge, or stay put; how often he walks to your mouse; walking speed
 - **Sound**: on/off, how often, volume, play now. His mouth opens while he makes the sound
 - **Appearance**: size, opacity, in front of windows or on the desktop; eyes that watch your cursor; blinking

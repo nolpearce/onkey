@@ -1,4 +1,4 @@
-ONKEY DESKTOP PET - VERSION 4 - WINDOWS
+ONKEY DESKTOP PET - VERSION 4.1 - WINDOWS
 
 START
 1. Exit any older Onkey from its tray icon first.
@@ -9,6 +9,9 @@ START
 
 SETTINGS (right-click the tray icon)
   Pause Onkey
+  How many Onkeys    one, two, three, five, or ten (chaos). Each wanders and
+                     blinks on his own. Windows plays one sound at a time, so
+                     a new "oooo" cuts off the last one.
   Where Onkey goes   anywhere, along the bottom/top, left/right side, or stay
                      in one spot; how often he walks to your mouse; walking
                      speed; Bring Onkey to this screen

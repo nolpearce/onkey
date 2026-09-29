@@ -35,7 +35,7 @@ namespace OnkeyDesktopPet
                 Native.SetProcessDPIAware();
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
-                Application.Run(new OnkeyForm());
+                Application.Run(new OnkeyApp());
             }
         }
     }
@@ -503,7 +503,7 @@ namespace OnkeyDesktopPet
             path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Onkey", "settings.txt");
             string[] defaults = {
                 "zone=anywhere", "chase=5", "speed=42", "soundOn=true", "soundGap=90", "volume=1",
-                "size=1", "opacity=1", "layer=above", "draggable=false", "watchCursor=true", "blink=true" };
+                "size=1", "opacity=1", "layer=above", "draggable=false", "watchCursor=true", "blink=true", "count=1" };
             foreach (string line in defaults) Parse(line);
             try { if (File.Exists(path)) foreach (string line in File.ReadAllLines(path)) Parse(line); }
             catch { /* Unreadable settings just mean the defaults. */ }
@@ -609,109 +609,103 @@ namespace OnkeyDesktopPet
         public void Dispose() { if (player != null) { player.Stop(); player.Dispose(); } }
     }
 
-    public sealed class OnkeyForm : Form
+    // Owns everything the Onkeys share: the tray menu, settings, drawing, sound and clock.
+    internal sealed class OnkeyApp : ApplicationContext
     {
         private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
-        // Delay per eye, [left, right] on screen: the left blinks first, the right close behind.
-        private static readonly double[] BlinkOrder = { 0, 0.14 };
 
-        private readonly Random random = new Random();
+        public readonly Random Random = new Random();
+        public readonly Stopwatch Wall = Stopwatch.StartNew();
+        public readonly Settings Settings = new Settings();
+        public readonly OnkeyRenderer Renderer;
+        public readonly OnkeySound Sound;
+        public Bitmap[] Frames = new Bitmap[0];
+        public float[] FrameBounce = new float[0];
+        public Bitmap Idle;
+        public RectangleF PetBounds = new RectangleF(0, 0, OnkeyRenderer.CanvasWidth, OnkeyRenderer.CanvasHeight);
+        // Seconds Onkey has been awake; stops while paused.
+        public double Clock;
+        public bool Paused;
+
         private readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer();
-        private readonly Stopwatch wall = Stopwatch.StartNew();
         private readonly NotifyIcon tray = new NotifyIcon();
-        private readonly Settings settings = new Settings();
         private readonly string folder;
-        private readonly OnkeyRenderer renderer;
-        private readonly OnkeySound sound;
+        private readonly List<PetForm> pets = new List<PetForm>();
         private readonly List<ToolStripMenuItem> optionItems = new List<ToolStripMenuItem>();
         private readonly List<ToolStripMenuItem> soundOptionItems = new List<ToolStripMenuItem>();
         private ToolStripMenuItem pauseItem, loginItem;
-        private Bitmap[] frames = new Bitmap[0];
-        private float[] frameBounce = new float[0];
-        private Bitmap idle, work, current;
-        private float currentBounce;
-        private RectangleF petBounds = new RectangleF(0, 0, OnkeyRenderer.CanvasWidth, OnkeyRenderer.CanvasHeight);
-        private LayeredSurface surface;
-        private Rectangle area;
         private float dpi = 1;
-        private double px, py, targetX, targetY, phase, clock, lastTick, restUntil, nextSound;
-        private double blinkStart = -100, nextBlink = 3, soundStart = double.NegativeInfinity, mouthOpen;
-        private readonly PointF[] gaze = new PointF[2];
-        private bool paused, dragging, dragMoved, disposed;
-        private Point grabMouse;
-        private double grabX, grabY;
+        private double lastTick;
+        private bool exiting;
 
-        private float PixelScale { get { return (float)settings.Number("size") * dpi; } }   // Pixels per canvas point.
-        private bool Watching { get { return settings.Bool("watchCursor"); } }
+        public float PixelScale { get { return (float)Settings.Number("size") * dpi; } }   // Pixels per canvas point.
+        public bool Watching { get { return Settings.Bool("watchCursor"); } }
+        public int CanvasPixelsWide { get { return (int)Math.Round(OnkeyRenderer.CanvasWidth * PixelScale); } }
+        public int CanvasPixelsHigh { get { return (int)Math.Round(OnkeyRenderer.CanvasHeight * PixelScale); } }
 
-        public OnkeyForm()
+        public OnkeyApp()
         {
             folder = Environment.GetEnvironmentVariable("ONKEY_ASSET_DIR") ?? AppDomain.CurrentDomain.BaseDirectory;
-            renderer = new OnkeyRenderer(Path.Combine(folder, "Onkey.png"));
+            Renderer = new OnkeyRenderer(Path.Combine(folder, "Onkey.png"));
             string soundPath = Path.Combine(folder, Path.Combine("Sounds", "oooo.wav"));
-            if (File.Exists(soundPath)) { try { sound = new OnkeySound(soundPath); } catch { sound = null; } }
+            if (File.Exists(soundPath)) { try { Sound = new OnkeySound(soundPath); } catch { Sound = null; } }
             using (Graphics g = Graphics.FromHwnd(IntPtr.Zero)) dpi = g.DpiX / 96f;
-
-            AutoScaleMode = AutoScaleMode.None;
-            FormBorderStyle = FormBorderStyle.None;
-            ShowInTaskbar = false;
-            StartPosition = FormStartPosition.Manual;
             RenderFrames();
 
-            area = Screen.FromPoint(Cursor.Position).WorkingArea;
-            px = area.Right - work.Width - 60;
-            py = area.Bottom - work.Height - 40;
-            if (settings.Has("savedX"))
+            // The first Onkey comes back where he was last time.
+            Rectangle area = Screen.FromPoint(Cursor.Position).WorkingArea;
+            Point origin = new Point(area.Right - CanvasPixelsWide - 60, area.Bottom - CanvasPixelsHigh - 40);
+            if (Settings.Has("savedX"))
             {
-                Point saved = new Point((int)settings.Number("savedX"), (int)settings.Number("savedY"));
+                Point saved = new Point((int)Settings.Number("savedX"), (int)Settings.Number("savedY"));
                 foreach (Screen screen in Screen.AllScreens)
                 {
                     Rectangle near = screen.WorkingArea;
                     near.Inflate(200, 200);
-                    if (near.Contains(saved)) { area = screen.WorkingArea; px = saved.X; py = saved.Y; break; }
+                    if (near.Contains(saved)) { area = screen.WorkingArea; origin = saved; break; }
                 }
             }
-            ClampToArea();
-            Location = new Point((int)px, (int)py);
-            ClientSize = new System.Drawing.Size(work.Width, work.Height);
-            PickTarget();
-            nextSound = SoundDelay();
+            AddPet(origin, area);
+            MatchPetCount();
             BuildMenu();
+            tray.Visible = true;
             SystemEvents.DisplaySettingsChanged += OnDisplayChanged;
+            lastTick = Wall.Elapsed.TotalSeconds;
             timer.Interval = 33;
             timer.Tick += delegate { Tick(); };
-        }
-
-        protected override bool ShowWithoutActivation { get { return true; } }
-        protected override CreateParams CreateParams
-        {
-            get
-            {
-                CreateParams cp = base.CreateParams;
-                // WS_EX_LAYERED + WS_EX_TOOLWINDOW + WS_EX_NOACTIVATE, plus WS_EX_TRANSPARENT
-                // (clicks pass through) unless dragging is enabled.
-                cp.ExStyle |= 0x00080000 | 0x00000080 | 0x08000000;
-                if (!settings.Bool("draggable")) cp.ExStyle |= 0x00000020;
-                return cp;
-            }
-        }
-        protected override void OnPaintBackground(PaintEventArgs e) { }
-        protected override void OnPaint(PaintEventArgs e) { }
-
-        protected override void OnShown(EventArgs e)
-        {
-            base.OnShown(e);
-            ApplyAppearance();
-            current = idle;
-            Present();
-            tray.Visible = true;
-            lastTick = wall.Elapsed.TotalSeconds;
             timer.Start();
         }
 
-        // Frames and window
+        // Onkeys
 
-        private void RenderFrames()
+        private void AddPet(Point origin, Rectangle area)
+        {
+            PetForm pet = new PetForm(this, origin, area);
+            pets.Add(pet);
+            pet.Show();
+        }
+
+        // Adds or removes Onkeys to match the "How many Onkeys" setting. New ones turn up
+        // somewhere random on the first Onkey's screen.
+        private void MatchPetCount()
+        {
+            int wanted = Math.Max(1, (int)Settings.Number("count"));
+            while (pets.Count > wanted)
+            {
+                PetForm pet = pets[pets.Count - 1];
+                pets.RemoveAt(pets.Count - 1);
+                pet.Close();
+            }
+            while (pets.Count < wanted)
+            {
+                Rectangle area = pets.Count > 0 ? pets[0].Area : Screen.FromPoint(Cursor.Position).WorkingArea;
+                Point origin = new Point(area.Left + Random.Next(Math.Max(1, area.Width - CanvasPixelsWide)),
+                                         area.Top + Random.Next(Math.Max(1, area.Height - CanvasPixelsHigh)));
+                AddPet(origin, area);
+            }
+        }
+
+        public void RenderFrames()
         {
             float s = PixelScale;
             bool blank = Watching;
@@ -721,26 +715,24 @@ namespace OnkeyDesktopPet
             for (int i = 0; i < rendered.Length; i++)
             {
                 double p = i * 2 * Math.PI / rendered.Length;
-                rendered[i] = renderer.Render(p, true, s, blank);
+                rendered[i] = Renderer.Render(p, true, s, blank);
                 bounce[i] = OnkeyRenderer.Bounce(p, true);
                 RectangleF b = OnkeyRenderer.OpaqueBounds(rendered[i], s);
                 bounds = bounds.IsEmpty ? b : RectangleF.Union(bounds, b);
             }
-            Bitmap still = renderer.Render(0, false, s, blank);
+            Bitmap still = Renderer.Render(0, false, s, blank);
             bounds = RectangleF.Union(bounds, OnkeyRenderer.OpaqueBounds(still, s));
-            foreach (Bitmap f in frames) f.Dispose();
-            if (idle != null) idle.Dispose();
-            if (work != null) work.Dispose();
-            frames = rendered; frameBounce = bounce; idle = still; petBounds = bounds;
-            work = new Bitmap(still.Width, still.Height, PixelFormat.Format32bppPArgb);
-            current = idle; currentBounce = 0;
-            if (surface != null) { surface.Dispose(); surface = null; }
-            if (IsHandleCreated) surface = new LayeredSurface(work.Width, work.Height);
+            Bitmap[] oldFrames = Frames;
+            Bitmap oldIdle = Idle;
+            Frames = rendered; FrameBounce = bounce; Idle = still; PetBounds = bounds;
+            foreach (PetForm pet in pets) pet.FramesChanged();
+            foreach (Bitmap f in oldFrames) f.Dispose();
+            if (oldIdle != null) oldIdle.Dispose();
         }
 
         private Icon MakeTrayIcon()
         {
-            using (Bitmap face = renderer.Render(0, false, 1, false))
+            using (Bitmap face = Renderer.Render(0, false, 1, false))
             using (Bitmap icon = new Bitmap(32, 32, PixelFormat.Format32bppPArgb))
             {
                 RectangleF b = OnkeyRenderer.OpaqueBounds(face, 1);
@@ -767,6 +759,13 @@ namespace OnkeyDesktopPet
             menu.Items.Add(pauseItem);
             menu.Items.Add(new ToolStripSeparator());
 
+            menu.Items.Add(Submenu("How many Onkeys",
+                Option("One", "count", "1"),
+                Option("Two", "count", "2"),
+                Option("Three", "count", "3"),
+                Option("Five", "count", "5"),
+                Option("Ten (chaos)", "count", "10")));
+
             menu.Items.Add(Submenu("Where Onkey goes",
                 Option("Anywhere on the screen", "zone", "anywhere"),
                 Option("Along the bottom", "zone", "bottom"),
@@ -789,11 +788,11 @@ namespace OnkeyDesktopPet
                 new ToolStripSeparator(),
                 Item("Bring Onkey to this screen", delegate { BringHere(); })));
 
-            ToolStripMenuItem playNow = Item("Play sound now", delegate { PlaySound(true); });
+            ToolStripMenuItem playNow = Item("Play sound now", delegate { PlayNow(); });
             ToolStripItem[] soundOptions = {
                 Header("How often"),
                 Option("Every 20-40 seconds", "soundGap", "20"),
-                Option("Every 1\u00BD-3 minutes", "soundGap", "90"),
+                Option("Every 1½-3 minutes", "soundGap", "90"),
                 Option("Every 5-10 minutes", "soundGap", "300"),
                 new ToolStripSeparator(),
                 Header("Volume"),
@@ -803,7 +802,7 @@ namespace OnkeyDesktopPet
             foreach (ToolStripItem i in soundOptions) { ToolStripMenuItem m = i as ToolStripMenuItem; if (m != null && m.Tag != null) soundOptionItems.Add(m); }
             soundOptionItems.Add(playNow);
             List<ToolStripItem> soundMenu = new List<ToolStripItem>();
-            soundMenu.Add(Option(sound == null ? "Sound clip not installed" : "Sound on", "soundOn", "true"));
+            soundMenu.Add(Option(Sound == null ? "Sound clip not installed" : "Sound on", "soundOn", "true"));
             soundMenu.Add(new ToolStripSeparator());
             soundMenu.AddRange(soundOptions);
             soundMenu.Add(new ToolStripSeparator());
@@ -835,7 +834,7 @@ namespace OnkeyDesktopPet
             menu.Items.Add(new ToolStripSeparator());
             loginItem = Item("Open Onkey when Windows starts", delegate { ToggleLogin(); });
             menu.Items.Add(loginItem);
-            menu.Items.Add(Item("Exit Onkey", delegate { Close(); }));
+            menu.Items.Add(Item("Exit Onkey", delegate { Exit(); }));
 
             tray.Icon = MakeTrayIcon();
             tray.Text = "Onkey - right-click for settings";
@@ -882,36 +881,36 @@ namespace OnkeyDesktopPet
 
         private void Choose(string key, string value)
         {
-            if (value == "true") settings.Set(key, settings.Bool(key) ? "false" : "true");
-            else settings.Set(key, value);
+            int oldWidth = CanvasPixelsWide, oldHeight = CanvasPixelsHigh;
+            if (value == "true") Settings.Set(key, Settings.Bool(key) ? "false" : "true");
+            else Settings.Set(key, value);
             switch (key)
             {
+                case "count":
+                    MatchPetCount();
+                    break;
                 case "size":
-                    double cx = px + work.Width / 2.0, cy = py + work.Height / 2.0;
                     RenderFrames();
-                    px = cx - work.Width / 2.0; py = cy - work.Height / 2.0;
-                    ClampToArea();
-                    PickTarget();
+                    foreach (PetForm pet in pets) pet.Resized(oldWidth, oldHeight);
                     break;
                 case "watchCursor":
                     RenderFrames();
                     break;
                 case "opacity": case "layer": case "draggable":
-                    ApplyAppearance();
+                    foreach (PetForm pet in pets) pet.ApplyAppearance();
                     break;
                 case "zone": case "chase":
-                    restUntil = 0;
-                    PickTarget();
+                    foreach (PetForm pet in pets) { pet.RestFor(0); pet.PickTarget(); }
                     break;
                 case "soundGap":
-                    nextSound = clock + SoundDelay();
+                    foreach (PetForm pet in pets) pet.RescheduleSound();
                     break;
                 case "soundOn":
-                    if (!settings.Bool("soundOn")) StopSound();
+                    if (!Settings.Bool("soundOn")) StopSound();
                     break;
             }
             RefreshMenu();
-            Present();
+            foreach (PetForm pet in pets) pet.Present();
         }
 
         private void RefreshMenu()
@@ -919,9 +918,9 @@ namespace OnkeyDesktopPet
             foreach (ToolStripMenuItem item in optionItems)
             {
                 string[] tag = (string[])item.Tag;
-                item.Checked = tag[1] == "true" ? settings.Bool(tag[0]) : settings.Get(tag[0]) == tag[1];
+                item.Checked = tag[1] == "true" ? Settings.Bool(tag[0]) : Settings.Get(tag[0]) == tag[1];
             }
-            bool soundOn = sound != null && settings.Bool("soundOn");
+            bool soundOn = Sound != null && Settings.Bool("soundOn");
             foreach (ToolStripMenuItem item in soundOptionItems) item.Enabled = soundOn;
             try
             {
@@ -931,17 +930,252 @@ namespace OnkeyDesktopPet
             catch { loginItem.Enabled = false; }
         }
 
-        private void ApplyAppearance()
+        // Ticking
+
+        private void Tick()
         {
-            TopMost = settings.Get("layer") != "desktop";
+            double now = Wall.Elapsed.TotalSeconds;
+            double dt = Math.Min(0.08, Math.Max(0, now - lastTick));
+            lastTick = now;
+            if (!Paused) Clock += dt;
+            bool desktop = Settings.Get("layer") == "desktop";
+            foreach (PetForm pet in pets.ToArray())
+            {
+                if (!Paused && !pet.Dragging) pet.Walk(dt);
+                pet.UpdateFace(now, dt);
+                pet.Present();
+                if (desktop) pet.SendToBottom();
+            }
+        }
+
+        private void OnDisplayChanged(object sender, EventArgs e)
+        {
+            if (pets.Count == 0 || !pets[0].IsHandleCreated) return;
+            pets[0].BeginInvoke((MethodInvoker)delegate { foreach (PetForm pet in pets) pet.ScreensChanged(); });
+        }
+
+        public void SavePosition()
+        {
+            if (pets.Count == 0) return;
+            Settings.Set("savedX", pets[0].X);
+            Settings.Set("savedY", pets[0].Y);
+        }
+
+        public bool IsLead(PetForm pet) { return pets.Count > 0 && pets[0] == pet; }
+
+        // Sound. Windows plays one sound at a time here, so a new "oooo" cuts off the last
+        // one, and only the Onkey speaking now moves his mouth.
+
+        public double SoundDelay()
+        {
+            double gap = Settings.Number("soundGap");
+            return gap + Random.NextDouble() * gap;
+        }
+
+        public void Speak(PetForm speaker, bool force)
+        {
+            if (Sound == null || (!force && !Settings.Bool("soundOn"))) return;
+            try
+            {
+                Sound.Play(Settings.Number("volume"));
+                double now = Wall.Elapsed.TotalSeconds;
+                foreach (PetForm pet in pets) pet.SoundStart = pet == speaker ? now : double.NegativeInfinity;
+            }
+            catch { /* An invalid or unavailable clip must not interrupt the pet. */ }
+        }
+
+        private void StopSound()
+        {
+            if (Sound != null) Sound.Stop();
+            foreach (PetForm pet in pets) pet.SoundStart = double.NegativeInfinity;
+        }
+
+        // Actions
+
+        private void TogglePause()
+        {
+            Paused = !Paused;
+            pauseItem.Text = Paused ? "Resume Onkey" : "Pause Onkey";
+            if (Paused) { StopSound(); foreach (PetForm pet in pets) pet.ShowIdle(); }
+        }
+
+        private void PlayNow()
+        {
+            if (pets.Count > 0) Speak(pets[Random.Next(pets.Count)], true);
+        }
+
+        // Gathers every Onkey onto the screen under the mouse, loosely around the middle.
+        private void BringHere()
+        {
+            Rectangle area = Screen.FromPoint(Cursor.Position).WorkingArea;
+            for (int i = 0; i < pets.Count; i++)
+            {
+                double spread = i == 0 ? 0 : Math.Min(area.Width, area.Height) * 0.25;
+                pets[i].MoveTo(area,
+                    area.Left + (area.Width - CanvasPixelsWide) / 2.0 + (Random.NextDouble() * 2 - 1) * spread,
+                    area.Top + (area.Height - CanvasPixelsHigh) / 2.0 + (Random.NextDouble() * 2 - 1) * spread);
+            }
+            SavePosition();
+        }
+
+        private void ToggleLogin()
+        {
+            try
+            {
+                using (RegistryKey run = Registry.CurrentUser.CreateSubKey(RunKey))
+                {
+                    if (run.GetValue("Onkey") != null) run.DeleteValue("Onkey");
+                    else run.SetValue("Onkey", "wscript.exe \"" + Path.Combine(folder, "Start Onkey.vbs") + "\"");
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Couldn't change the startup setting: " + ex.Message, "Onkey");
+            }
+            RefreshMenu();
+        }
+
+        private void Exit()
+        {
+            if (exiting) return;
+            exiting = true;
+            SavePosition();
+            SystemEvents.DisplaySettingsChanged -= OnDisplayChanged;
+            timer.Stop(); timer.Dispose();
+            foreach (PetForm pet in pets.ToArray()) pet.Close();
+            pets.Clear();
+            tray.Visible = false;
+            if (tray.ContextMenuStrip != null) tray.ContextMenuStrip.Dispose();
+            if (tray.Icon != null) Native.DestroyIcon(tray.Icon.Handle);
+            tray.Dispose();
+            if (Sound != null) Sound.Dispose();
+            foreach (Bitmap f in Frames) f.Dispose();
+            if (Idle != null) Idle.Dispose();
+            Renderer.Dispose();
+            ExitThread();
+        }
+    }
+
+    // One Onkey on screen: his window, where he's walking, and his eyes, blinks and mouth.
+    internal sealed class PetForm : Form
+    {
+        // Delay per eye, [left, right] on screen: the left blinks first, the right close behind.
+        private static readonly double[] BlinkOrder = { 0, 0.14 };
+
+        private readonly OnkeyApp app;
+        public Rectangle Area;
+        private double px, py, targetX, targetY, phase, restUntil, nextSound;
+        private double blinkStart = -100, nextBlink, mouthOpen;
+        public double SoundStart = double.NegativeInfinity;
+        private readonly PointF[] gaze = new PointF[2];
+        private Bitmap work, current;
+        private float currentBounce;
+        private LayeredSurface surface;
+        private bool dragging, dragMoved, closed;
+        private Point grabMouse;
+        private double grabX, grabY;
+
+        public double X { get { return px; } }
+        public double Y { get { return py; } }
+        public bool Dragging { get { return dragging; } }
+        private float PixelScale { get { return app.PixelScale; } }
+
+        public PetForm(OnkeyApp app, Point origin, Rectangle area)
+        {
+            this.app = app;
+            Area = area;
+            px = origin.X; py = origin.Y;
+            nextBlink = app.Wall.Elapsed.TotalSeconds + 2 + app.Random.NextDouble() * 6;
+            AutoScaleMode = AutoScaleMode.None;
+            FormBorderStyle = FormBorderStyle.None;
+            ShowInTaskbar = false;
+            StartPosition = FormStartPosition.Manual;
+            FramesChanged();
+            ClampToArea();
+            Location = new Point((int)px, (int)py);
+            PickTarget();
+            RescheduleSound();
+        }
+
+        protected override bool ShowWithoutActivation { get { return true; } }
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                CreateParams cp = base.CreateParams;
+                // WS_EX_LAYERED + WS_EX_TOOLWINDOW + WS_EX_NOACTIVATE, plus WS_EX_TRANSPARENT
+                // (clicks pass through) unless dragging is enabled.
+                cp.ExStyle |= 0x00080000 | 0x00000080 | 0x08000000;
+                if (!app.Settings.Bool("draggable")) cp.ExStyle |= 0x00000020;
+                return cp;
+            }
+        }
+        protected override void OnPaintBackground(PaintEventArgs e) { }
+        protected override void OnPaint(PaintEventArgs e) { }
+
+        protected override void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+            ApplyAppearance();
+            Present();
+        }
+
+        // New frames (a new size, or eyes switched): a canvas and surface to match.
+        public void FramesChanged()
+        {
+            if (work != null) work.Dispose();
+            work = new Bitmap(app.Idle.Width, app.Idle.Height, PixelFormat.Format32bppPArgb);
+            current = app.Idle; currentBounce = 0;
+            ClientSize = new System.Drawing.Size(work.Width, work.Height);
+            if (surface != null) { surface.Dispose(); surface = null; }
+            if (IsHandleCreated) surface = new LayeredSurface(work.Width, work.Height);
+        }
+
+        public void ApplyAppearance()
+        {
+            TopMost = app.Settings.Get("layer") != "desktop";
             // Switching click-through on or off needs the window style updated in place.
             if (IsHandleCreated)
             {
                 int style = Native.GetWindowLong(Handle, -20);
-                style = settings.Bool("draggable") ? style & ~0x20 : style | 0x20;
+                style = app.Settings.Bool("draggable") ? style & ~0x20 : style | 0x20;
                 Native.SetWindowLong(Handle, -20, style);
                 if (surface == null) surface = new LayeredSurface(work.Width, work.Height);
             }
+        }
+
+        public void SendToBottom()
+        {
+            if (IsHandleCreated) Native.SetWindowPos(Handle, new IntPtr(1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);   // HWND_BOTTOM, no size/move/activate.
+        }
+
+        // After a size change: keep him centred where he was, at the new size.
+        public void Resized(int oldWidth, int oldHeight)
+        {
+            px += (oldWidth - work.Width) / 2.0;
+            py += (oldHeight - work.Height) / 2.0;
+            ClampToArea();
+            PickTarget();
+        }
+
+        public void ShowIdle() { current = app.Idle; currentBounce = 0; }
+        public void RestFor(double seconds) { restUntil = app.Clock + seconds; }
+        public void RescheduleSound() { nextSound = app.Clock + app.SoundDelay(); }
+
+        public void MoveTo(Rectangle area, double x, double y)
+        {
+            Area = area; px = x; py = y;
+            ClampToArea();
+            RestFor(2);
+            PickTarget();
+            ShowIdle();
+        }
+
+        public void ScreensChanged()
+        {
+            Area = Screen.FromPoint(new Point((int)px + work.Width / 2, (int)py + work.Height / 2)).WorkingArea;
+            ClampToArea();
+            PickTarget();
         }
 
         // Movement
@@ -951,10 +1185,11 @@ namespace OnkeyDesktopPet
         private void Limits(out double minX, out double maxX, out double minY, out double maxY)
         {
             float s = PixelScale;
-            minX = area.Left - petBounds.Left * s;
-            maxX = Math.Max(minX, area.Right - petBounds.Right * s);
-            minY = area.Top - petBounds.Top * s;
-            maxY = Math.Max(minY, area.Bottom - petBounds.Bottom * s);
+            RectangleF b = app.PetBounds;
+            minX = Area.Left - b.Left * s;
+            maxX = Math.Max(minX, Area.Right - b.Right * s);
+            minY = Area.Top - b.Top * s;
+            maxY = Math.Max(minY, Area.Bottom - b.Bottom * s);
         }
 
         private void ClampToArea()
@@ -965,16 +1200,16 @@ namespace OnkeyDesktopPet
             py = Math.Min(maxY, Math.Max(minY, py));
         }
 
-        private void PickTarget()
+        public void PickTarget()
         {
             double minX, maxX, minY, maxY;
             Limits(out minX, out maxX, out minY, out maxY);
-            string zone = settings.Get("zone");
+            string zone = app.Settings.Get("zone");
             if (zone == "stay") { targetX = px; targetY = py; return; }
-            double x = minX + random.NextDouble() * (maxX - minX), y = minY + random.NextDouble() * (maxY - minY);
-            int chase = (int)settings.Number("chase");
+            double x = minX + app.Random.NextDouble() * (maxX - minX), y = minY + app.Random.NextDouble() * (maxY - minY);
+            int chase = (int)app.Settings.Number("chase");
             Point mouse = Cursor.Position;
-            if (chase > 0 && random.Next(chase) == 0 && area.Contains(mouse))
+            if (chase > 0 && app.Random.Next(chase) == 0 && Area.Contains(mouse))
             {
                 x = Math.Min(maxX, Math.Max(minX, mouse.X - work.Width / 2.0));
                 y = Math.Min(maxY, Math.Max(minY, mouse.Y - work.Height / 2.0));
@@ -986,54 +1221,43 @@ namespace OnkeyDesktopPet
             targetX = x; targetY = y;
         }
 
-        private void Tick()
+        public void Walk(double dt)
         {
-            double now = wall.Elapsed.TotalSeconds;
-            double dt = Math.Min(0.08, Math.Max(0, now - lastTick));
-            lastTick = now;
-            if (!paused && !dragging) Walk(dt);
-            UpdateFace(now, dt);
-            Present();
-            if (settings.Get("layer") == "desktop")
-                Native.SetWindowPos(Handle, new IntPtr(1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);   // HWND_BOTTOM, no size/move/activate.
-        }
-
-        private void Walk(double dt)
-        {
-            clock += dt;
-            if (clock >= nextSound) { PlaySound(false); nextSound = clock + SoundDelay(); }
-            current = idle; currentBounce = 0;
-            if (clock < restUntil || settings.Get("zone") == "stay") return;
+            double clock = app.Clock;
+            if (clock >= nextSound) { app.Speak(this, false); nextSound = clock + app.SoundDelay(); }
+            ShowIdle();
+            if (clock < restUntil || app.Settings.Get("zone") == "stay") return;
             double dx = targetX - px, dy = targetY - py;
             double distance = Math.Sqrt(dx * dx + dy * dy);
             if (distance < 3)
             {
-                restUntil = clock + 2 + random.NextDouble() * 4;
+                restUntil = clock + 2 + app.Random.NextDouble() * 4;
                 PickTarget();
                 return;
             }
-            double speed = settings.Number("speed") * PixelScale;
+            double speed = app.Settings.Number("speed") * PixelScale;
             double step = Math.Min(distance, speed * dt);
             px += step * dx / distance;
             py += step * dy / distance;
             // Faster walking means faster arms, so he never looks like he's skating.
             phase = (phase + dt * 2 * Math.PI * 1.15 * speed / (42 * PixelScale)) % (2 * Math.PI);
+            Bitmap[] frames = app.Frames;
             int index = ((int)(phase / (2 * Math.PI) * frames.Length)) % frames.Length;
-            current = frames[index]; currentBounce = frameBounce[index];
+            current = frames[index]; currentBounce = app.FrameBounce[index];
         }
 
         // Eyes, eyelids and mouth
 
-        private void UpdateFace(double now, double dt)
+        public void UpdateFace(double now, double dt)
         {
             // Each pupil eases toward the cursor, so he goes a bit cross-eyed when it's close.
-            if (Watching)
+            if (app.Watching)
             {
                 Point mouse = Cursor.Position;
                 float s = PixelScale, ease = (float)(1 - Math.Exp(-dt * 14));
                 for (int i = 0; i < 2; i++)
                 {
-                    PointF c = OnkeyRenderer.CanvasPoint(renderer.Pupils[i].Center, currentBounce);
+                    PointF c = OnkeyRenderer.CanvasPoint(app.Renderer.Pupils[i].Center, currentBounce);
                     double dx = mouse.X - (Math.Round(px) + c.X * s), dy = mouse.Y - (Math.Round(py) + c.Y * s);
                     double distance = Math.Sqrt(dx * dx + dy * dy);
                     // Full travel once the cursor is a few eye-widths away; centred when it's on the eye.
@@ -1043,22 +1267,22 @@ namespace OnkeyDesktopPet
                 }
             }
             // Blinks every 6-14 seconds.
-            if (settings.Bool("blink") && now >= nextBlink)
+            if (app.Settings.Bool("blink") && now >= nextBlink)
             {
                 blinkStart = now;
-                nextBlink = now + 6 + random.NextDouble() * 8;
+                nextBlink = now + 6 + app.Random.NextDouble() * 8;
             }
             // Opens his mouth "just a tad", following how loud the clip is at this moment.
-            double t = now - soundStart, target2 = 0;
-            if (sound != null && t >= 0 && t < sound.Envelope.Length / 60.0)
-                target2 = Math.Min(1, sound.Envelope[(int)(t * 60)] * 1.25);
-            mouthOpen += (target2 - mouthOpen) * (1 - Math.Exp(-dt * 25));
+            double t = now - SoundStart, open = 0;
+            if (app.Sound != null && t >= 0 && t < app.Sound.Envelope.Length / 60.0)
+                open = Math.Min(1, app.Sound.Envelope[(int)(t * 60)] * 1.25);
+            mouthOpen += (open - mouthOpen) * (1 - Math.Exp(-dt * 25));
         }
 
         // Each blink is a quick close, a beat shut, and open (0.37 s in all).
         private float Closure(int eye)
         {
-            double t = wall.Elapsed.TotalSeconds - blinkStart - BlinkOrder[eye];
+            double t = app.Wall.Elapsed.TotalSeconds - blinkStart - BlinkOrder[eye];
             if (t < 0) return 0;
             if (t < 0.11) return (float)(t / 0.11);
             if (t < 0.21) return 1;
@@ -1066,9 +1290,9 @@ namespace OnkeyDesktopPet
             return 0;
         }
 
-        private void Present()
+        public void Present()
         {
-            if (surface == null || current == null) return;
+            if (closed || surface == null || current == null) return;
             using (Graphics g = Graphics.FromImage(work))
             {
                 g.CompositingMode = CompositingMode.SourceCopy;
@@ -1078,37 +1302,20 @@ namespace OnkeyDesktopPet
                 g.InterpolationMode = InterpolationMode.HighQualityBilinear;
                 g.PixelOffsetMode = PixelOffsetMode.HighQuality;
                 OnkeyRenderer.ToSprite(g, PixelScale, currentBounce);
-                if (Watching)
+                if (app.Watching)
                     for (int i = 0; i < 2; i++)
                     {
-                        Cutout p = renderer.Pupils[i];
+                        Cutout p = app.Renderer.Pupils[i];
                         float k = OnkeyRenderer.PupilScale;
                         g.DrawImage(p.Image, new RectangleF(p.Center.X + gaze[i].X - (p.Center.X - p.Rect.X) * k,
                                                             p.Center.Y + gaze[i].Y - (p.Center.Y - p.Rect.Y) * k,
                                                             p.Rect.Width * k, p.Rect.Height * k));
                     }
-                for (int i = 0; i < 2; i++) Features.DrawLid(g, renderer.EyeInteriors[i], Closure(i), renderer.LidColor, i);
+                for (int i = 0; i < 2; i++) Features.DrawLid(g, app.Renderer.EyeInteriors[i], Closure(i), app.Renderer.LidColor, i);
                 Features.DrawMouth(g, (float)mouthOpen);
             }
-            byte alpha = (byte)Math.Max(0, Math.Min(255, settings.Number("opacity") * 255));
+            byte alpha = (byte)Math.Max(0, Math.Min(255, app.Settings.Number("opacity") * 255));
             surface.Show(Handle, work, (int)Math.Round(px), (int)Math.Round(py), alpha);
-        }
-
-        private void OnDisplayChanged(object sender, EventArgs e)
-        {
-            if (!IsHandleCreated) return;
-            BeginInvoke((MethodInvoker)delegate
-            {
-                area = Screen.FromPoint(new Point((int)px + work.Width / 2, (int)py + work.Height / 2)).WorkingArea;
-                ClampToArea();
-                PickTarget();
-            });
-        }
-
-        private void SavePosition()
-        {
-            settings.Set("savedX", px);
-            settings.Set("savedY", py);
         }
 
         // Dragging (when "Let me drag Onkey around" is ticked)
@@ -1136,94 +1343,21 @@ namespace OnkeyDesktopPet
         {
             base.OnMouseUp(e);
             if (e.Button != MouseButtons.Left) return;
-            if (!dragMoved) { PlaySound(true); return; }
+            if (!dragMoved) { app.Speak(this, true); return; }
             dragging = false;
-            area = Screen.FromPoint(Cursor.Position).WorkingArea;
-            restUntil = clock + 3;
+            Area = Screen.FromPoint(Cursor.Position).WorkingArea;
+            RestFor(3);
             PickTarget();
-            SavePosition();
-        }
-
-        // Sound
-
-        private double SoundDelay()
-        {
-            double gap = settings.Number("soundGap");
-            return gap + random.NextDouble() * gap;
-        }
-
-        private void PlaySound(bool force)
-        {
-            if (sound == null || (!force && !settings.Bool("soundOn"))) return;
-            try
-            {
-                sound.Play(settings.Number("volume"));
-                soundStart = wall.Elapsed.TotalSeconds;
-            }
-            catch { /* An invalid or unavailable clip must not interrupt the pet. */ }
-        }
-
-        private void StopSound()
-        {
-            if (sound != null) sound.Stop();
-            soundStart = double.NegativeInfinity;
-        }
-
-        // Actions
-
-        private void TogglePause()
-        {
-            paused = !paused;
-            pauseItem.Text = paused ? "Resume Onkey" : "Pause Onkey";
-            if (paused) { StopSound(); current = idle; currentBounce = 0; }
-        }
-
-        private void BringHere()
-        {
-            area = Screen.FromPoint(Cursor.Position).WorkingArea;
-            px = area.Left + (area.Width - work.Width) / 2.0;
-            py = area.Top + (area.Height - work.Height) / 2.0;
-            ClampToArea();
-            restUntil = clock + 2;
-            PickTarget();
-            SavePosition();
-        }
-
-        private void ToggleLogin()
-        {
-            try
-            {
-                using (RegistryKey run = Registry.CurrentUser.CreateSubKey(RunKey))
-                {
-                    if (run.GetValue("Onkey") != null) run.DeleteValue("Onkey");
-                    else run.SetValue("Onkey", "wscript.exe \"" + Path.Combine(folder, "Start Onkey.vbs") + "\"");
-                }
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show("Couldn't change the startup setting: " + ex.Message, "Onkey");
-            }
-            RefreshMenu();
+            if (app.IsLead(this)) app.SavePosition();
         }
 
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
-            if (!disposed)
+            if (!closed)
             {
-                disposed = true;
-                SavePosition();
-                SystemEvents.DisplaySettingsChanged -= OnDisplayChanged;
-                timer.Stop(); timer.Dispose();
-                tray.Visible = false;
-                if (tray.ContextMenuStrip != null) tray.ContextMenuStrip.Dispose();
-                if (tray.Icon != null) Native.DestroyIcon(tray.Icon.Handle);
-                tray.Dispose();
-                if (sound != null) sound.Dispose();
+                closed = true;
                 if (surface != null) surface.Dispose();
-                foreach (Bitmap f in frames) f.Dispose();
-                if (idle != null) idle.Dispose();
                 if (work != null) work.Dispose();
-                renderer.Dispose();
             }
             base.OnFormClosed(e);
         }

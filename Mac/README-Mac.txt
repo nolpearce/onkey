@@ -1,10 +1,12 @@
-ONKEY DESKTOP PET - MAC - VERSION 4
+ONKEY DESKTOP PET - MAC - VERSION 4.1
 
 START
 Open Onkey from your Applications folder (or Launchpad / Spotlight).
 Click the little Onkey head in the menu bar (top right of the screen) for:
 
   Pause Onkey
+  How Many Onkeys    one, two, three, five, or ten (chaos). Each wanders,
+                     blinks and "oooo"s on his own.
   Where Onkey Goes   anywhere, along the bottom/top, left/right side, or stay
                      in one spot; how often he walks to your mouse; walking
                      speed; Bring Onkey to This Screen
