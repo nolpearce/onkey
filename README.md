@@ -1,6 +1,6 @@
 # Onkey
 
-A little desktop pet that wanders around your screen going "oooo". Just for fun, not for commercial use.
+A little desktop pet that wanders around your screen going "oooo". Just for fun :)
 
 ![Onkey walking](Preview.gif)
 
