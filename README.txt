@@ -1,38 +1,40 @@
-ONKEY DESKTOP PET - VERSION 3 - WINDOWS
+ONKEY DESKTOP PET - VERSION 4 - WINDOWS
 
 START
-1. Exit the old Onkey from its tray icon first.
-2. Extract this entire ZIP to a fresh folder.
+1. Exit any older Onkey from its tray icon first.
+2. Keep all the files together in one folder.
 3. Double-click "Start Onkey.vbs".
-4. Right-click the icon beside the Windows clock for Pause, Mute, or Exit.
-   Expand the ^ arrow if the icon is hidden.
+4. Right-click Onkey's icon beside the Windows clock for settings.
+   Expand the ^ arrow if the icon is hidden. Double-click it to pause.
 
-CHANGES
-- True per-pixel transparency fixes the old pink edge.
-- Onkey is approximately 40% smaller (140 pixels wide instead of 224).
-- Arms alternate lifting and planting while he moves; his head gently bobs.
-- He rests briefly between trips.
-- Sound is scheduled only once every 90-180 seconds.
-- The old synthetic chirp and text speech bubbles have been removed.
+SETTINGS (right-click the tray icon)
+  Pause Onkey
+  Where Onkey goes   anywhere, along the bottom/top, left/right side, or stay
+                     in one spot; how often he walks to your mouse; walking
+                     speed; Bring Onkey to this screen
+  Sound              on/off, how often, volume, Play sound now.
+                     His mouth opens while he makes his sound.
+  Appearance         size (tiny to huge), opacity, in front of all windows or
+                     on the desktop behind windows
+                     Eyes > Watch my cursor: his pupils follow your mouse
+                     Eyes > Blink now and then: left eye, then right
+  Let me drag Onkey around
+                     when ticked, drag him anywhere; click him to hear him.
+                     When unticked, clicks pass straight through him.
+  Open Onkey when Windows starts
+  Exit Onkey
 
-AUDIO
-Your supplied short Onkey sound is included as Sounds\oooo.wav.
-It plays once every 90-180 seconds while Onkey is running and unpaused.
-Right-click the tray icon to mute or unmute it.
-The clip has short fades at the edges to prevent clicks.
+Settings and his position are saved in %APPDATA%\Onkey\settings.txt.
+"Open Onkey when Windows starts" adds an entry under
+HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run; untick it to
+remove it again. If you move the Onkey folder, untick and re-tick it.
 
 WINDOWS REQUIREMENTS
 Windows PowerShell and .NET Framework, included in standard Windows 10/11.
-The supplied C# source is compiled in memory on launch; no Python is needed.
+Onkey.cs is compiled in memory on launch; no Python or install is needed.
 Windows Script Host is used by the VBS launcher. If VBS is disabled, open
 Windows PowerShell in this folder and run:
     powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Start Onkey.ps1"
 
-Clicks pass through Onkey. Controls are in the system tray. The app does not
-use the internet or start automatically with Windows. Keep all files together.
-
-VERIFICATION
-The C# source compiles successfully. All 40 animation frames were rendered
-and checked for transparent edges, clipping, and correct alpha data.
-Native Windows overlay behavior still needs checking on a Windows desktop.
-Preview.gif shows the walking cycle.
+The app does not use the internet. Onkey is drawn live from Onkey.png, so he
+stays sharp at every size and on high-DPI screens.

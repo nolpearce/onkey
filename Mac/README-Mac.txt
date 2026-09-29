@@ -21,8 +21,11 @@ Click the little Onkey head in the menu bar (top right of the screen) for:
 
 Settings and his position are remembered between launches.
 
-If macOS says the app "can't be opened" the first time, right-click
-Onkey.app > Open > Open. You only need to do this once.
+If you downloaded Onkey (rather than building it), macOS will say it can't
+check the app the first time. Click Done, then open System Settings >
+Privacy & Security, scroll down, and click "Open Anyway" next to Onkey.
+On macOS 14 or older you can instead right-click Onkey.app > Open > Open.
+You only need to do this once.
 
 REBUILDING
 After changing Onkey.swift, Onkey.png or the sound, run in Terminal:

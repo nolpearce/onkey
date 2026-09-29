@@ -12,8 +12,11 @@ trap 'rm -rf "$work"' EXIT
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 
-echo "Compiling..."
-swiftc -O -target "$(uname -m)-apple-macos13.0" -o "$app/Contents/MacOS/Onkey" "$here/Onkey.swift" -framework AppKit -framework AVFoundation
+echo "Compiling for Apple silicon and Intel..."
+for arch in arm64 x86_64; do
+    swiftc -O -target "$arch-apple-macos13.0" -o "$work/Onkey-$arch" "$here/Onkey.swift" -framework AppKit -framework AVFoundation
+done
+lipo -create "$work/Onkey-arm64" "$work/Onkey-x86_64" -output "$app/Contents/MacOS/Onkey"
 mkdir -p "$app/Contents/Resources/Sounds"
 cp "$root/Onkey.png" "$app/Contents/Resources/"
 cp "$root/Sounds/oooo.wav" "$app/Contents/Resources/Sounds/"
