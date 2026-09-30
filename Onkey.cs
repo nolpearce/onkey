@@ -1119,7 +1119,8 @@ namespace OnkeyDesktopPet
                 // WS_EX_LAYERED + WS_EX_TOOLWINDOW + WS_EX_NOACTIVATE, plus WS_EX_TRANSPARENT
                 // (clicks pass through) unless dragging is enabled.
                 cp.ExStyle |= 0x00080000 | 0x00000080 | 0x08000000;
-                if (!app.Settings.Bool("draggable")) cp.ExStyle |= 0x00000020;
+                // The base Form constructor reads CreateParams before ours has set app.
+                if (app == null || !app.Settings.Bool("draggable")) cp.ExStyle |= 0x00000020;
                 return cp;
             }
         }
