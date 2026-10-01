@@ -121,6 +121,11 @@ namespace OnkeyDesktopPet
             if (IsHandleCreated) Native.SetWindowPos(Handle, new IntPtr(1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);   // HWND_BOTTOM, no size/move/activate.
         }
 
+        public void BringToTop()
+        {
+            if (IsHandleCreated) Native.SetWindowPos(Handle, new IntPtr(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);   // HWND_TOPMOST, no size/move/activate.
+        }
+
         // After a size change: keep him centred where he was, at the new size.
         public void Resized(int oldWidth, int oldHeight)
         {

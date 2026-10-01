@@ -383,15 +383,18 @@ namespace OnkeyDesktopPet
             lastTick = now;
             if (!Paused) Clock += dt;
             float squash = BeatSquash(now, dt);
-            // Keeping desktop-layer Onkeys behind other windows only needs doing now and then.
-            bool desktop = Settings.Get("layer") == "desktop" && ++tickCount % 15 == 0;
+            // Windows doesn't keep him where he was put: a newly opened window (a browser's new
+            // tab or window, say) can land above him even while he's topmost. Putting him back
+            // in his layer now and then is enough to undo that (but not over the open tray menu).
+            bool restack = ++tickCount % 15 == 0 && !tray.ContextMenuStrip.Visible;
+            bool desktop = Settings.Get("layer") == "desktop";
             foreach (PetForm pet in pets.ToArray())
             {
                 if (!Paused && !pet.Dragging) pet.Walk(dt);
                 pet.UpdateFace(now, dt);
                 pet.Squash = squash;
                 pet.Present();
-                if (desktop) pet.SendToBottom();
+                if (restack) { if (desktop) pet.SendToBottom(); else pet.BringToTop(); }
             }
         }
 
