@@ -81,6 +81,10 @@ final class Pet {
             ? NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopIconWindow)) + 1)
             : .floating
         window.ignoresMouseEvents = !d.bool(forKey: Key.draggable)
+        // Without .fullScreenAuxiliary he stays out of full-screen apps' spaces.
+        window.collectionBehavior = d.bool(forKey: Key.overFullScreen)
+            ? [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
+            : [.canJoinAllSpaces, .stationary, .ignoresCycle]
     }
 
     // After a size change: keep him centred where he was, at the new size.

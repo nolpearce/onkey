@@ -7,12 +7,13 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
     private(set) var renderer: OnkeyRenderer!
     private var statusItem: NSStatusItem!
     private var pauseItem: NSMenuItem!
-    private var loginItem: NSMenuItem!
     private var updateItem: NSMenuItem!
     // Finds and installs new releases from GitHub.
-    private let updater = Updater()
+    let updater = Updater()
     private var optionItems: [NSMenuItem] = []
-    private var soundOptionItems: [NSMenuItem] = []
+    private var settingsWindow: SettingsWindow?
+    // Called whenever a setting or the update state changes, so an open Settings window can follow.
+    var onSettingsChanged: (() -> Void)?
     private var pets: [Pet] = []
     private(set) var frames: [CGImage] = []
     private(set) var idle: CGImage!
@@ -45,7 +46,7 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
         defaults.register(defaults: [
             Key.zone: "anywhere", Key.chase: 5, Key.speed: 42.0,
             Key.soundOn: true, Key.soundGap: 90.0, Key.volume: 1.0,
-            Key.size: 1.0, Key.opacity: 1.0, Key.layer: "above", Key.draggable: false, Key.watchCursor: true, Key.blink: true,
+            Key.size: 1.0, Key.opacity: 1.0, Key.layer: "above", Key.overFullScreen: true, Key.draggable: false, Key.watchCursor: true, Key.blink: true,
             Key.count: 1, Key.dance: false, Key.checkUpdates: true,
         ])
         prefs = Prefs(defaults)
@@ -155,17 +156,21 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
         petBounds = bounds.union(still.opaqueBounds)
     }
 
-    private func menuIcon() -> NSImage {
-        guard let f = renderer.render(phase: 0, walking: false, pixelsPerPoint: 4),
-              let cropped = f.image.cropping(to: f.opaqueBounds.applying(CGAffineTransform(scaleX: 4, y: 4)).integral)
+    private func menuIcon() -> NSImage { headImage(height: 18) }
+
+    // Onkey's head, cropped from the top of his opaque area.
+    func headImage(height: CGFloat) -> NSImage {
+        let k = max(4, (height / 18).rounded(.up) * 4)
+        guard let f = renderer.render(phase: 0, walking: false, pixelsPerPoint: k),
+              let cropped = f.image.cropping(to: f.opaqueBounds.applying(CGAffineTransform(scaleX: k, y: k)).integral)
         else { return NSImage() }
-        let height: CGFloat = 18
         let width = height * CGFloat(cropped.width) / CGFloat(cropped.height)
         return NSImage(cgImage: cropped, size: NSSize(width: width, height: height))
     }
 
     // MARK: Menu
 
+    // The menu keeps only the quick actions; everything else is in the Settings window.
     private func buildMenu() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.image = menuIcon()
@@ -175,85 +180,13 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
         menu.autoenablesItems = false   // So the update item can grey out while downloading.
         pauseItem = item("Pause Onkey", #selector(togglePause), "p")
         menu.addItem(pauseItem)
-        menu.addItem(option("Dance to Music", Key.dance, true))
+        menu.addItem(option("Dance to Music", Key.dance))
+        menu.addItem(option("Let Me Drag Onkey Around", Key.draggable))
         menu.addItem(.separator())
-
-        menu.addItem(submenu("How Many Onkeys", [
-            option("One", Key.count, 1),
-            option("Two", Key.count, 2),
-            option("Three", Key.count, 3),
-            option("Five", Key.count, 5),
-            option("Ten (chaos)", Key.count, 10),
-        ]))
-
-        menu.addItem(submenu("Where Onkey Goes", [
-            option("Anywhere on the screen", Key.zone, "anywhere"),
-            option("Along the bottom", Key.zone, "bottom"),
-            option("Along the top", Key.zone, "top"),
-            option("Up and down the left side", Key.zone, "left"),
-            option("Up and down the right side", Key.zone, "right"),
-            option("Stay in one spot", Key.zone, "stay"),
-            .separator(),
-            header("Walks toward my mouse"),
-            option("Never", Key.chase, 0),
-            option("Sometimes", Key.chase, 5),
-            option("Often", Key.chase, 2),
-            option("Always", Key.chase, 1),
-            .separator(),
-            header("Walking speed"),
-            option("Slow", Key.speed, 22.0),
-            option("Normal", Key.speed, 42.0),
-            option("Fast", Key.speed, 80.0),
-            option("Zoomies", Key.speed, 160.0),
-            .separator(),
-            item("Bring Onkey to This Screen", #selector(bringHere), "b"),
-        ]))
-
-        let playNow = item("Play Sound Now", #selector(playNow), "s")
-        let soundOptions = [
-            header("How often"),
-            option("Every 20-40 seconds", Key.soundGap, 20.0),
-            option("Every 1½-3 minutes", Key.soundGap, 90.0),
-            option("Every 5-10 minutes", Key.soundGap, 300.0),
-            .separator(),
-            header("Volume"),
-            option("Quiet", Key.volume, 0.25),
-            option("Medium", Key.volume, 0.6),
-            option("Loud", Key.volume, 1.0),
-        ]
-        soundOptionItems = soundOptions + [playNow]
-        menu.addItem(submenu("Sound", [option("Sound On", Key.soundOn, true), .separator()]
-                             + soundOptions + [.separator(), playNow]))
-
-        menu.addItem(submenu("Appearance", [
-            header("Size"),
-            option("Tiny", Key.size, 0.5),
-            option("Small", Key.size, 0.75),
-            option("Normal", Key.size, 1.0),
-            option("Large", Key.size, 1.5),
-            option("Huge", Key.size, 2.25),
-            .separator(),
-            header("Opacity"),
-            option("Solid", Key.opacity, 1.0),
-            option("See-through", Key.opacity, 0.7),
-            option("Ghost", Key.opacity, 0.35),
-            .separator(),
-            header("Layer"),
-            option("In front of all windows", Key.layer, "above"),
-            option("On the desktop, behind windows", Key.layer, "desktop"),
-            .separator(),
-            header("Eyes"),
-            option("Watch my cursor", Key.watchCursor, true),
-            option("Blink now and then", Key.blink, true),
-        ]))
-
-        menu.addItem(option("Let Me Drag Onkey Around", Key.draggable, true))
-        menu.addItem(.separator())
-        updateItem = item("Check for Updates…", #selector(checkForUpdates), "u")
+        // Only shown while there's an update to install.
+        updateItem = item("Update Onkey…", #selector(checkForUpdates), "u")
         menu.addItem(updateItem)
-        menu.addItem(option("Check for Updates Automatically", Key.checkUpdates, true))
-        loginItem = item("Open Onkey at Login", #selector(toggleLogin), "")
-        menu.addItem(loginItem)
+        menu.addItem(item("Settings…", #selector(showSettings), ","))
         menu.addItem(item("Quit Onkey", #selector(quit), "q"))
         statusItem.menu = menu
         refreshMenu()
@@ -265,39 +198,31 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
         return i
     }
 
-    private func header(_ title: String) -> NSMenuItem {
-        let i = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-        i.isEnabled = false
-        return i
-    }
-
-    private func submenu(_ title: String, _ items: [NSMenuItem]) -> NSMenuItem {
-        let parent = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-        let sub = NSMenu(title: title)
-        sub.autoenablesItems = false
-        items.forEach { sub.addItem($0) }
-        parent.submenu = sub
-        return parent
-    }
-
-    // A menu choice stored in UserDefaults. Bool options toggle; others act as radio buttons.
-    private func option(_ title: String, _ key: String, _ value: Any) -> NSMenuItem {
-        let i = item(title, #selector(chooseOption(_:)), "")
-        i.representedObject = OptionTag(key, value as! NSObject)
+    // An on/off setting.
+    private func option(_ title: String, _ key: String) -> NSMenuItem {
+        let i = item(title, #selector(toggleOption(_:)), "")
+        i.representedObject = key
         optionItems.append(i)
         return i
     }
 
-    @objc private func chooseOption(_ sender: NSMenuItem) {
-        guard let tag = sender.representedObject as? OptionTag else { return }
+    @objc private func toggleOption(_ sender: NSMenuItem) {
+        guard let key = sender.representedObject as? String else { return }
+        change(key, to: !defaults.bool(forKey: key))
+    }
+
+    @objc func showSettings() {
+        if settingsWindow == nil { settingsWindow = SettingsWindow(app: self) }
+        settingsWindow?.show()
+    }
+
+    // Stores a setting and puts it into effect straight away.
+    func change(_ key: String, to value: Any) {
+        if let old = defaults.object(forKey: key) as? NSObject, let new = value as? NSObject, old.isEqual(new) { return }
         let oldWindowSize = windowSize
-        if CFGetTypeID(tag.value) == CFBooleanGetTypeID() {
-            defaults.set(!defaults.bool(forKey: tag.key), forKey: tag.key)
-        } else {
-            defaults.set(tag.value, forKey: tag.key)
-        }
+        defaults.set(value, forKey: key)
         prefs = Prefs(defaults)
-        switch tag.key {
+        switch key {
         case Key.count:
             matchPetCount()
         case Key.dance:
@@ -308,7 +233,7 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
         case Key.watchCursor:
             renderFrames()
             pets.forEach { $0.framesChanged(); $0.updateFace(dt: 1) }
-        case Key.opacity, Key.layer, Key.draggable:
+        case Key.opacity, Key.layer, Key.draggable, Key.overFullScreen:
             pets.forEach { $0.applyAppearance() }
         case Key.zone, Key.chase:
             pets.forEach { $0.restFor(0); $0.pickTarget() }
@@ -326,25 +251,25 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
 
     private func refreshMenu() {
         for i in optionItems {
-            guard let tag = i.representedObject as? OptionTag else { continue }
-            i.state = (defaults.object(forKey: tag.key) as? NSObject)?.isEqual(tag.value) == true ? .on : .off
+            guard let key = i.representedObject as? String else { continue }
+            i.state = defaults.bool(forKey: key) ? .on : .off
         }
-        let soundOn = defaults.bool(forKey: Key.soundOn) && baseSound != nil
-        soundOptionItems.forEach { if $0.action != nil { $0.isEnabled = soundOn } }
-        if updater.downloading, let release = updater.available {
-            updateItem.title = "Downloading Onkey \(release.version)…"
-        } else if let release = updater.available {
-            updateItem.title = "Update to Onkey \(release.version)…"
+        if let release = updater.available {
+            updateItem.isHidden = false
+            updateItem.title = updater.downloading ? "Downloading Onkey \(release.version)…" : "Update to Onkey \(release.version)…"
         } else {
-            updateItem.title = "Check for Updates…"
+            updateItem.isHidden = true
         }
         updateItem.isEnabled = !updater.downloading
         statusItem.button?.toolTip = updater.available.map { "Onkey (version \($0.version) is available)" } ?? "Onkey"
-        if #available(macOS 13, *) {
-            loginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
-        } else {
-            loginItem.isHidden = true
-        }
+        onSettingsChanged?()
+    }
+
+    var hasSound: Bool { baseSound != nil }
+
+    var opensAtLogin: Bool {
+        if #available(macOS 13, *) { return SMAppService.mainApp.status == .enabled }
+        return false
     }
 
     // MARK: Ticking
@@ -451,10 +376,10 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
     }
 
     // Every Onkey says it at once.
-    @objc private func playNow() { pets.forEach { $0.playSound(force: true) } }
+    @objc func playNow() { pets.forEach { $0.playSound(force: true) } }
 
     // Gathers every Onkey onto the screen under the mouse, loosely around the middle.
-    @objc private func bringHere() {
+    @objc func bringHere() {
         let area = Self.screenUnderMouse().visibleFrame
         for (i, pet) in pets.enumerated() {
             let spread = i == 0 ? 0 : min(area.width, area.height) * 0.25
@@ -469,7 +394,7 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
         savePosition()
     }
 
-    @objc private func toggleLogin() {
+    @objc func toggleLogin() {
         guard #available(macOS 13, *) else { return }
         do {
             if SMAppService.mainApp.status == .enabled {
@@ -487,7 +412,7 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
         refreshMenu()
     }
 
-    @objc private func checkForUpdates() { updater.menuChosen() }
+    @objc func checkForUpdates() { updater.menuChosen() }
 
     @objc private func quit() { listener.stop(); NSApp.terminate(nil) }
 

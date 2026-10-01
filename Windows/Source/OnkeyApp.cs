@@ -403,7 +403,6 @@ namespace OnkeyDesktopPet
         {
             Paused = !Paused;
             pauseItem.Text = Paused ? "Resume Onkey" : "Pause Onkey";
-            pauseItem.Checked = Paused;
             if (Paused) { StopSound(); foreach (PetForm pet in pets) pet.ShowIdle(); }
         }
 

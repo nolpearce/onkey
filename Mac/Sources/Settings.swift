@@ -3,7 +3,7 @@ import AppKit
 enum Key {
     static let zone = "zone", chase = "chase", speed = "speed"
     static let soundOn = "soundOn", soundGap = "soundGap", volume = "volume"
-    static let size = "size", opacity = "opacity", layer = "layer", draggable = "draggable"
+    static let size = "size", opacity = "opacity", layer = "layer", overFullScreen = "overFullScreen", draggable = "draggable"
     static let watchCursor = "watchCursor", blink = "blink"
     static let count = "count", dance = "dance"
     static let checkUpdates = "checkUpdates"
@@ -30,9 +30,4 @@ struct Prefs {
         blink = d.bool(forKey: Key.blink)
         dance = d.bool(forKey: Key.dance)
     }
-}
-
-final class OptionTag: NSObject {
-    let key: String, value: NSObject
-    init(_ key: String, _ value: NSObject) { self.key = key; self.value = value }
 }
