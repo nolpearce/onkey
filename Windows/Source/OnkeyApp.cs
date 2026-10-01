@@ -42,7 +42,8 @@ namespace OnkeyDesktopPet
         private readonly List<PetForm> pets = new List<PetForm>();
         private readonly List<ToolStripMenuItem> optionItems = new List<ToolStripMenuItem>();
         private ToolStripMenuItem pauseItem, updateItem;
-        private SettingsForm settingsForm;
+        private SettingsPanel panel;
+        private DateTime panelClosed = DateTime.MinValue;
         // Fired whenever a setting or the update state changes, so an open Settings window can follow.
         public event Action SettingsChanged;
         // Finds and installs new releases from GitHub.
@@ -195,15 +196,20 @@ namespace OnkeyDesktopPet
             // Only shown while there's an update to install.
             updateItem = Item("Update Onkey...", delegate { updater.MenuChosen(); });
             menu.Items.Add(updateItem);
-            ToolStripMenuItem settingsItem = Item("Settings...", delegate { ShowSettings(); });
+            ToolStripMenuItem settingsItem = Item("Settings...", delegate { ShowSettings(Cursor.Position); });
             settingsItem.Font = new Font(settingsItem.Font, FontStyle.Bold);
             menu.Items.Add(settingsItem);
             menu.Items.Add(Item("Exit Onkey", delegate { Exit(); }));
 
             tray.Icon = MakeTrayIcon();
-            tray.Text = "Onkey - right-click for settings";
+            tray.Text = "Onkey - click for settings";
             tray.ContextMenuStrip = menu;
-            tray.DoubleClick += delegate { TogglePause(); };
+            tray.MouseClick += delegate(object sender, MouseEventArgs e)
+            {
+                // Clicking the icon while the panel is open closes it (it closes itself as the
+                // click lands), so don't open it straight back up.
+                if (e.Button == MouseButtons.Left && (DateTime.Now - panelClosed).TotalMilliseconds > 300) ShowSettings(Cursor.Position);
+            };
             RefreshMenu();
         }
 
@@ -224,16 +230,13 @@ namespace OnkeyDesktopPet
             return item;
         }
 
-        public void ShowSettings()
+        // Pops the settings panel up beside the tray icon.
+        public void ShowSettings(Point near)
         {
-            if (settingsForm == null || settingsForm.IsDisposed)
-            {
-                settingsForm = new SettingsForm(this, updater, tray.Icon);
-                settingsForm.FormClosed += delegate { settingsForm = null; };
-                settingsForm.Show();
-            }
-            if (settingsForm.WindowState == FormWindowState.Minimized) settingsForm.WindowState = FormWindowState.Normal;
-            settingsForm.Activate();
+            if (panel != null) { panel.Activate(); return; }
+            panel = new SettingsPanel(this, updater);
+            panel.FormClosed += delegate { panel = null; panelClosed = DateTime.Now; };
+            panel.ShowNear(near);
         }
 
         // Stores a setting and puts it into effect straight away.
@@ -288,7 +291,7 @@ namespace OnkeyDesktopPet
                 updateItem.Visible = release != null;
                 if (release != null) updateItem.Text = updater.Downloading ? "Downloading Onkey " + release.Version + "..." : "Update to Onkey " + release.Version + "...";
                 updateItem.Enabled = !updater.Downloading;
-                tray.Text = release == null ? "Onkey - right-click for settings" : "Onkey - version " + release.Version + " is available";
+                tray.Text = release == null ? "Onkey - click for settings" : "Onkey - version " + release.Version + " is available";
             }
             else updateItem.Visible = false;
             if (SettingsChanged != null) SettingsChanged();
@@ -306,7 +309,7 @@ namespace OnkeyDesktopPet
             // Windows doesn't keep him where he was put: a newly opened window (a browser's new
             // tab or window, say) can land above him even while he's topmost. Putting him back
             // in his layer now and then is enough to undo that (but not over the open tray menu).
-            bool restack = ++tickCount % 15 == 0 && !tray.ContextMenuStrip.Visible;
+            bool restack = ++tickCount % 15 == 0 && !tray.ContextMenuStrip.Visible && panel == null;
             bool desktop = Settings.Get("layer") == "desktop";
             foreach (PetForm pet in pets.ToArray())
             {
@@ -399,11 +402,12 @@ namespace OnkeyDesktopPet
 
         // Actions
 
-        private void TogglePause()
+        public void TogglePause()
         {
             Paused = !Paused;
             pauseItem.Text = Paused ? "Resume Onkey" : "Pause Onkey";
             if (Paused) { StopSound(); foreach (PetForm pet in pets) pet.ShowIdle(); }
+            if (SettingsChanged != null) SettingsChanged();
         }
 
         public bool HasSound { get { return Sound != null; } }
@@ -457,12 +461,12 @@ namespace OnkeyDesktopPet
             RefreshMenu();
         }
 
-        private void Exit()
+        public void Exit()
         {
             if (exiting) return;
             exiting = true;
             SavePosition();
-            if (settingsForm != null) settingsForm.Close();
+            if (panel != null) panel.Close();
             SystemEvents.DisplaySettingsChanged -= OnDisplayChanged;
             timer.Stop(); timer.Dispose();
             foreach (PetForm pet in pets.ToArray()) pet.Close();

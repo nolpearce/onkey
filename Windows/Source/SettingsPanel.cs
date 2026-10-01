@@ -8,20 +8,23 @@ using System.Windows.Forms;
 
 namespace OnkeyDesktopPet
 {
-    // The Settings window: a hand-drawn jungle page with a tab for each group of settings.
-    // Everything is painted here (sketchy lines, vine sliders, leaf switches) rather than
-    // built from stock controls, and every change takes effect straight away.
-    internal sealed class SettingsForm : Form
+    // The settings drop-down: a hand-drawn jungle panel that pops up from the tray icon, with
+    // quick switches along the top and a tab for each group of settings. Everything is painted
+    // here (sketchy lines, vine sliders, leaf switches) rather than built from stock controls,
+    // and every change takes effect straight away. It closes when you click anywhere else.
+    internal sealed class SettingsPanel : Form
     {
-        public const float PageWidth = 600, PageHeight = 610;
+        public const float PageWidth = 380, PageHeight = 566;
         // The card the settings sit on, and the columns inside it.
-        public const float CardLeft = 18, CardTop = 104, CardRight = PageWidth - 18, CardBottom = PageHeight - 18;
-        public const float LabelLeft = 46, ControlLeft = 262, ControlRight = CardRight - 28;
+        public const float CardLeft = 12, CardTop = 124, CardRight = PageWidth - 12, CardBottom = PageHeight - 12;
+        public const float LabelLeft = 30, ControlRight = CardRight - 18;
+        private const float FooterTop = CardBottom - 50;
 
         private readonly OnkeyApp app;
         private readonly Updater updater;
         private readonly float scale;
         private readonly List<Page> pages = new List<Page>();
+        private readonly List<Widget> always = new List<Widget>();   // The quick switches and footer.
         private int current;
         private Widget pressed, hovered;
         private Bitmap backdrop, head;
@@ -34,31 +37,66 @@ namespace OnkeyDesktopPet
             public readonly List<Widget> Widgets = new List<Widget>();
         }
 
-        public SettingsForm(OnkeyApp app, Updater updater, Icon icon)
+        public SettingsPanel(OnkeyApp app, Updater updater)
         {
             this.app = app;
             this.updater = updater;
             using (Graphics g = Graphics.FromHwnd(IntPtr.Zero)) scale = g.DpiX / 96f;
-            Text = "Onkey Settings";
-            Icon = icon;
-            FormBorderStyle = FormBorderStyle.FixedSingle;
-            MaximizeBox = false;
-            StartPosition = FormStartPosition.CenterScreen;
+            Text = "Onkey";
+            FormBorderStyle = FormBorderStyle.None;
+            ShowInTaskbar = false;
+            TopMost = true;
+            StartPosition = FormStartPosition.Manual;
             ClientSize = new Size((int)Math.Ceiling(PageWidth * scale), (int)Math.Ceiling(PageHeight * scale));
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
             BackColor = Jungle.Night;
             KeyPreview = true;
+            using (GraphicsPath corners = Rounded(new RectangleF(0, 0, ClientSize.Width, ClientSize.Height), 14 * scale))
+                Region = new Region(corners);
 
             FontFamily hand = Jungle.HandFont();
-            TitleFont = new Font(hand, 27, FontStyle.Bold, GraphicsUnit.Pixel);
-            TabFont = new Font(hand, 17, FontStyle.Bold, GraphicsUnit.Pixel);
-            LabelFont = new Font(hand, 17, FontStyle.Bold, GraphicsUnit.Pixel);
-            ChipFont = new Font(hand, 15, FontStyle.Bold, GraphicsUnit.Pixel);
-            SmallFont = new Font(hand, 14, FontStyle.Regular, GraphicsUnit.Pixel);
-            head = app.RenderHead((int)Math.Round(52 * scale));
+            TitleFont = new Font(hand, 22, FontStyle.Bold, GraphicsUnit.Pixel);
+            TabFont = new Font(hand, 14, FontStyle.Bold, GraphicsUnit.Pixel);
+            LabelFont = new Font(hand, 15, FontStyle.Bold, GraphicsUnit.Pixel);
+            ChipFont = new Font(hand, 13, FontStyle.Bold, GraphicsUnit.Pixel);
+            SmallFont = new Font(hand, 12.5f, FontStyle.Regular, GraphicsUnit.Pixel);
+            head = app.RenderHead((int)Math.Round(40 * scale));
 
             BuildPages();
             app.SettingsChanged += Changed;
+        }
+
+        // Shows the panel beside the tray, on whichever side of the screen the taskbar is.
+        public void ShowNear(Point cursor)
+        {
+            Rectangle work = Screen.FromPoint(cursor).WorkingArea;
+            int w = Width, h = Height, gap = (int)(8 * scale);
+            int x = Math.Max(work.Left + gap, Math.Min(cursor.X - w / 2, work.Right - w - gap));
+            int y = Math.Max(work.Top + gap, Math.Min(cursor.Y - h / 2, work.Bottom - h - gap));
+            if (cursor.Y >= work.Bottom) y = work.Bottom - h - gap;
+            else if (cursor.Y < work.Top) y = work.Top + gap;
+            else if (cursor.X >= work.Right) x = work.Right - w - gap;
+            else if (cursor.X < work.Left) x = work.Left + gap;
+            Location = new Point(x, y);
+            Show();
+            Activate();
+        }
+
+        // Clicking anywhere else closes it, like a menu.
+        protected override void OnDeactivate(EventArgs e)
+        {
+            base.OnDeactivate(e);
+            if (pressed == null) Close();
+        }
+
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                CreateParams p = base.CreateParams;
+                p.ClassStyle |= 0x20000;   // CS_DROPSHADOW
+                return p;
+            }
         }
 
         protected override void Dispose(bool disposing)
@@ -79,15 +117,34 @@ namespace OnkeyDesktopPet
 
         private void BuildPages()
         {
-            Page behaviour = AddPage("Behaviour");
+            // Quick switches along the top, under his name.
+            float qx = 18;
+            foreach (QuickToggle q in new QuickToggle[] {
+                new QuickToggle("Pause", delegate { return app.Paused; }, delegate { app.TogglePause(); }),
+                new QuickToggle("Dance", delegate { return app.Settings.Bool("dance"); }, delegate { Flip("dance"); }),
+                new QuickToggle("Drag him", delegate { return app.Settings.Bool("draggable"); }, delegate { Flip("draggable"); }) })
+            {
+                q.Form = this;
+                float w = q.Width();
+                q.Bounds = new RectangleF(qx, 56, w, 28);
+                qx += w + 8;
+                always.Add(q);
+            }
+            SketchButton quit = new SketchButton("Exit Onkey", delegate { Close(); app.Exit(); });
+            quit.Form = this;
+            quit.Small = true;
+            quit.Bounds = new RectangleF(LabelLeft, FooterTop + 12, 0, 30);
+            always.Add(quit);
+
+            Page moves = AddPage("Moves");
             Stepper count = new Stepper(1, 20, delegate { return (int)app.Settings.Number("count"); },
                 delegate(int v) { app.Change("count", v); });
-            Add(behaviour, "How many Onkeys", count, delegate
+            Inline(moves, "How many Onkeys", count, delegate
             {
                 int n = (int)app.Settings.Number("count");
                 return n <= 1 ? "just the one" : n >= 8 ? "total chaos" : "a little troop";
             });
-            Add(behaviour, "Where he roams", Choices("zone",
+            Stacked(moves, "Where he roams", Choices("zone",
                 "Anywhere", "anywhere", "Bottom", "bottom", "Top", "top",
                 "Left side", "left", "Right side", "right", "Stay put", "stay"), null);
             // "chase" is how many trips out of N head for the mouse (0 for never).
@@ -95,92 +152,124 @@ namespace OnkeyDesktopPet
             Slider chase = new Slider(0, 3, delegate { return Math.Max(0, Array.IndexOf(chaseValues, app.Settings.Get("chase"))); },
                 delegate(double v) { app.Change("chase", chaseValues[(int)Math.Round(v)]); }, false);
             chase.Snap = 1;
-            Add(behaviour, "Walks to my mouse", chase, delegate
+            Stacked(moves, "Walks to my mouse", chase, delegate
             {
                 return chaseNames[Math.Max(0, Array.IndexOf(chaseValues, app.Settings.Get("chase")))];
             });
-            Add(behaviour, "Walking speed", NumberSlider("speed", 10, 200, false), delegate
+            Stacked(moves, "Walking speed", NumberSlider("speed", 10, 200, false), delegate
             {
                 double v = app.Settings.Number("speed");
                 return v < 30 ? "a slow stroll" : v < 60 ? "normal" : v < 120 ? "fast" : "zoomies!";
             });
-            Add(behaviour, "Dance to music", Switch("dance"), delegate { return "bops to the beat"; });
-            Add(behaviour, "Let me drag him", Switch("draggable"), delegate { return "click him to hear him"; });
-            Add(behaviour, null, new SketchButton("Bring Onkey to this screen", delegate { app.BringHere(); }), null);
+            Full(moves, new SketchButton("Bring Onkey to this screen", delegate { app.BringHere(); }));
 
             Page sound = AddPage("Sound");
             Func<bool> soundOn = delegate { return app.HasSound && app.Settings.Bool("soundOn"); };
             Toggle soundSwitch = Switch("soundOn");
             soundSwitch.Enabled = delegate { return app.HasSound; };
-            Add(sound, "Sound", soundSwitch, delegate { return app.HasSound ? "his oooo now and then" : "sound clip not installed"; });
+            Inline(sound, "Sound", soundSwitch, delegate { return app.HasSound ? "his oooo now and then" : "sound clip not installed"; });
             Slider gap = new Slider(0, GapSteps.Length - 1, delegate { return GapIndex(app.Settings.Number("soundGap")); },
                 delegate(double v) { app.Change("soundGap", GapSteps[(int)Math.Round(v)]); }, false);
             gap.Snap = 1;
             gap.Enabled = soundOn;
-            Add(sound, "How often", gap, delegate { return Every(app.Settings.Number("soundGap")); });
+            Stacked(sound, "How often", gap, delegate { return Every(app.Settings.Number("soundGap")); });
             Slider volume = NumberSlider("volume", 0.05, 1, false);
             volume.Enabled = soundOn;
-            Add(sound, "Volume", volume, delegate { return Percent(app.Settings.Number("volume")); });
+            Stacked(sound, "Volume", volume, delegate { return Percent(app.Settings.Number("volume")); });
             SketchButton play = new SketchButton("Say oooo now", delegate { app.PlayNow(); });
             play.Enabled = delegate { return app.HasSound; };
-            Add(sound, null, play, null);
+            Full(sound, play);
 
             Page look = AddPage("Look");
             // Re-rendering every frame is too slow to follow the mouse, so size waits for the drop.
-            Add(look, "Size", NumberSlider("size", 0.4, 3, true), delegate { return Percent(app.Settings.Number("size")); });
-            Add(look, "See-through", NumberSlider("opacity", 0.2, 1, false), delegate
+            Stacked(look, "Size", NumberSlider("size", 0.4, 3, true), delegate { return Percent(app.Settings.Number("size")); });
+            Stacked(look, "See-through", NumberSlider("opacity", 0.2, 1, false), delegate
             {
                 double v = app.Settings.Number("opacity");
                 return v > 0.95 ? "solid" : v < 0.45 ? "ghostly" : Percent(v) + " solid";
             });
-            Add(look, "Where he lives", Choices("layer", "In front", "above", "On the desktop", "desktop"), null);
+            Stacked(look, "Where he lives", Choices("layer", "In front", "above", "On the desktop", "desktop"), null);
             Toggle fullScreen = Switch("overFullScreen");
             fullScreen.Enabled = delegate { return app.Settings.Get("layer") != "desktop"; };
-            Add(look, "Over full-screen apps", fullScreen, delegate { return "videos, games, slideshows"; });
-            Add(look, "Watch my cursor", Switch("watchCursor"), delegate { return "his eyes follow the mouse"; });
-            Add(look, "Blink", Switch("blink"), delegate { return "now and then"; });
+            Inline(look, "Over full-screen apps", fullScreen, delegate { return "videos, games, slideshows"; });
+            Inline(look, "Watch my cursor", Switch("watchCursor"), delegate { return "his eyes follow the mouse"; });
+            Inline(look, "Blink", Switch("blink"), delegate { return "now and then"; });
 
             Page updates = AddPage("Updates");
-            Add(updates, null, new Note(delegate
+            Full(updates, new Note(delegate
             {
                 Updater.Release release = updater.Available;
                 if (release == null) return "You have Onkey " + Program.Version + ".";
                 return updater.Downloading ? "Downloading Onkey " + release.Version + "..."
-                    : "Onkey " + release.Version + " is out! You have " + Program.Version + ".";
-            }), null);
+                    : "Onkey " + release.Version + " is out!";
+            }));
             SketchButton check = new SketchButton("Check for updates", delegate { updater.MenuChosen(); });
             check.Text = delegate { return updater.Available == null ? "Check for updates" : "Update to Onkey " + updater.Available.Version; };
             check.Enabled = delegate { return !updater.Downloading; };
-            Add(updates, null, check, null);
-            Add(updates, "Check by himself", Switch("checkUpdates"), delegate { return "looks every few hours"; });
-            Add(updates, "Open at startup", new Toggle(delegate { return app.OpensAtLogin; }, delegate(bool on) { app.ToggleLogin(); }),
+            Full(updates, check);
+            Inline(updates, "Check by himself", Switch("checkUpdates"), delegate { return "looks every few hours"; });
+            Inline(updates, "Open at startup", new Toggle(delegate { return app.OpensAtLogin; }, delegate(bool on) { app.ToggleLogin(); }),
                 delegate { return "when Windows starts"; });
         }
+
+        private void Flip(string key) { app.Change(key, app.Settings.Bool(key) ? "false" : "true"); }
 
         private Page AddPage(string name)
         {
             Page page = new Page();
             page.Name = name;
-            float width = 112, gap = 8;
-            page.Tab = new RectangleF(CardLeft + 14 + pages.Count * (width + gap), CardTop - 40, width, 44);
+            float width = 78, gap = 6;
+            page.Tab = new RectangleF(CardLeft + 10 + pages.Count * (width + gap), CardTop - 32, width, 36);
             pages.Add(page);
             return page;
         }
 
-        // Rows stack down the card; a row with no label spans the whole width.
-        private void Add(Page page, string label, Widget widget, Func<string> caption)
+        private float NextTop(Page page)
         {
-            float top = CardTop + 30;
-            if (page.Widgets.Count > 0) top = page.Widgets[page.Widgets.Count - 1].RowBottom + 8;
+            return page.Widgets.Count == 0 ? CardTop + 20 : page.Widgets[page.Widgets.Count - 1].RowBottom + 10;
+        }
+
+        // Label (and note) on the left, a small control on the right.
+        private void Inline(Page page, string label, Widget widget, Func<string> caption)
+        {
+            float top = NextTop(page);
+            Place(page, widget, label, caption, top, top + 40, 0);
+        }
+
+        // Label on one line with its note at the right, and the control across the card below it.
+        private void Stacked(Page page, string label, Widget widget, Func<string> caption)
+        {
+            float top = NextTop(page);
+            widget.Stacked = true;
+            Place(page, widget, label, caption, top, top + 24, 24);
+        }
+
+        private void Full(Page page, Widget widget)
+        {
+            float top = NextTop(page);
+            Place(page, widget, null, null, top, top, 0);
+        }
+
+        private void Place(Page page, Widget widget, string label, Func<string> caption, float top, float controlTop, float labelHeight)
+        {
             widget.Form = this;
             widget.Label = label;
             widget.Caption = caption;
-            float left = label == null ? LabelLeft : ControlLeft;
-            float height = widget.Measure(ControlRight - left);
-            float rowHeight = Math.Max(height, caption != null ? 46 : 30);
-            widget.Bounds = new RectangleF(left, top + (rowHeight - height) / 2, ControlRight - left, height);
             widget.RowTop = top;
-            widget.RowBottom = top + rowHeight;
+            float width = ControlRight - LabelLeft;
+            float height = widget.Measure(width);
+            float natural = widget.NaturalWidth;
+            if (label != null && labelHeight == 0)
+            {
+                // Inline: centre the control against the label and its note.
+                widget.Bounds = new RectangleF(ControlRight - natural, top + (40 - height) / 2, natural, height);
+                widget.RowBottom = top + Math.Max(40, height);
+            }
+            else
+            {
+                widget.Bounds = new RectangleF(LabelLeft, controlTop, natural > 0 ? natural : width, height);
+                widget.RowBottom = controlTop + height;
+            }
             page.Widgets.Add(widget);
         }
 
@@ -211,8 +300,8 @@ namespace OnkeyDesktopPet
 
         private static string Every(double gap)
         {
-            if (gap * 2 < 120) return "every " + gap + "-" + gap * 2 + " seconds";
-            return "every " + Minutes(gap) + "-" + Minutes(gap * 2) + " minutes";
+            if (gap * 2 < 120) return "every " + gap + "-" + gap * 2 + " sec";
+            return "every " + Minutes(gap) + "-" + Minutes(gap * 2) + " min";
         }
 
         private static string Minutes(double seconds)
@@ -223,6 +312,18 @@ namespace OnkeyDesktopPet
         }
 
         private static string Percent(double v) { return Math.Round(v * 100) + "%"; }
+
+        private static GraphicsPath Rounded(RectangleF r, float radius)
+        {
+            GraphicsPath p = new GraphicsPath();
+            float d = radius * 2;
+            p.AddArc(r.Left, r.Top, d, d, 180, 90);
+            p.AddArc(r.Right - d, r.Top, d, d, 270, 90);
+            p.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+            p.AddArc(r.Left, r.Bottom - d, d, d, 90, 90);
+            p.CloseFigure();
+            return p;
+        }
 
         // Painting
 
@@ -243,24 +344,39 @@ namespace OnkeyDesktopPet
                 }
             }
             g.DrawImageUnscaled(backdrop, 0, 0);
-            g.DrawImage(head, (int)(20 * scale), (int)(12 * scale));
+            g.DrawImage(head, (int)(14 * scale), (int)(9 * scale));
 
             Jungle.Prepare(g);
             g.ScaleTransform(scale, scale);
-            Jungle.Text(g, "Onkey's settings", TitleFont, Jungle.Paper, new PointF(80, 22));
+            Jungle.Text(g, "Onkey", TitleFont, Jungle.Paper, new PointF(60, 14));
+            using (GraphicsPath edge = Rounded(new RectangleF(0.5f, 0.5f, PageWidth - 1, PageHeight - 1), 14))
+            using (Pen ink = new Pen(Jungle.Ink, 2)) g.DrawPath(ink, edge);
 
             for (int i = 0; i < pages.Count; i++) if (i != current) DrawTab(g, pages[i], false);
             Jungle.Card(g, RectangleF.FromLTRB(CardLeft, CardTop, CardRight, CardBottom), 11);
             DrawTab(g, pages[current], true);
+            using (Pen rule = new Pen(Color.FromArgb(90, Jungle.Ink), 1.2f))
+                g.DrawCurve(rule, Sketch.Wiggle(new PointF(LabelLeft, FooterTop), new PointF(ControlRight, FooterTop), 4, 1.2f));
+            Jungle.Text(g, "v" + Program.Version, SmallFont, Jungle.Faded, new PointF(ControlRight - 40, FooterTop + 18));
 
+            foreach (Widget w in always) w.Paint(g, w.Enabled(), w == hovered);
             foreach (Widget w in pages[current].Widgets)
             {
                 bool enabled = w.Enabled();
                 if (w.Label != null)
                 {
-                    float y = w.RowTop + (w.RowBottom - w.RowTop) / 2 - (w.Caption != null ? 19 : 11);
+                    float y = w.Stacked ? w.RowTop : w.RowTop + 20 - (w.Caption != null ? 18 : 10);
                     Jungle.Text(g, w.Label, LabelFont, enabled ? Jungle.Ink : Jungle.Faded, new PointF(LabelLeft, y));
-                    if (w.Caption != null) Jungle.Text(g, w.Caption(), SmallFont, Jungle.Faded, new PointF(LabelLeft + 1, y + 21));
+                    if (w.Caption != null)
+                    {
+                        string caption = w.Caption();
+                        if (w.Stacked)
+                        {
+                            SizeF size = g.MeasureString(caption, SmallFont);
+                            Jungle.Text(g, caption, SmallFont, Jungle.Faded, new PointF(ControlRight - size.Width, y + 3));
+                        }
+                        else Jungle.Text(g, caption, SmallFont, Jungle.Faded, new PointF(LabelLeft + 1, y + 19));
+                    }
                 }
                 w.Paint(g, enabled, w == hovered && enabled);
             }
@@ -269,18 +385,17 @@ namespace OnkeyDesktopPet
         private void DrawTab(Graphics g, Page page, bool selected)
         {
             RectangleF r = page.Tab;
-            if (!selected) r = new RectangleF(r.X, r.Y + 6, r.Width, r.Height - 6);
+            if (!selected) r = new RectangleF(r.X, r.Y + 5, r.Width, r.Height - 5);
             int seed = (int)r.X * 7 + (selected ? 1 : 0);
             using (GraphicsPath path = Sketch.Tab(r, seed))
             {
-                using (Brush fill = new SolidBrush(selected ? Jungle.Paper : Jungle.Bark))
-                    g.FillPath(fill, path);
+                using (Brush fill = new SolidBrush(selected ? Jungle.Paper : Jungle.Bark)) g.FillPath(fill, path);
                 if (!selected)
                 {
                     // Wood grain.
                     using (Pen grain = new Pen(Color.FromArgb(70, Jungle.Ink), 1))
                         for (int i = 1; i < 3; i++)
-                            g.DrawCurve(grain, Sketch.Wiggle(new PointF(r.Left + 10, r.Top + i * r.Height / 3), new PointF(r.Right - 10, r.Top + i * r.Height / 3 + 2), seed + i, 1.2f));
+                            g.DrawCurve(grain, Sketch.Wiggle(new PointF(r.Left + 8, r.Top + i * r.Height / 3), new PointF(r.Right - 8, r.Top + i * r.Height / 3 + 2), seed + i, 1.2f));
                 }
                 Sketch.Stroke(g, path, Jungle.Ink, 2f);
             }
@@ -300,6 +415,8 @@ namespace OnkeyDesktopPet
 
         private Widget WidgetAt(PointF p)
         {
+            foreach (Widget w in always)
+                if (w.Interactive && w.Enabled() && w.HitArea().Contains(p)) return w;
             foreach (Widget w in pages[current].Widgets)
                 if (w.Interactive && w.Enabled() && w.HitArea().Contains(p)) return w;
             return null;
@@ -336,7 +453,7 @@ namespace OnkeyDesktopPet
             pressed = null;
             Capture = false;
             w.Up(Logical(e));
-            Invalidate();
+            if (!IsDisposed) Invalidate();
         }
 
         protected override void OnMouseLeave(EventArgs e)
@@ -360,7 +477,6 @@ namespace OnkeyDesktopPet
         }
     }
 
-    // Colours, the hand-drawn font, and the jungle behind the card.
     internal static class Jungle
     {
         public static readonly Color Night = Color.FromArgb(28, 52, 34);
@@ -586,13 +702,16 @@ namespace OnkeyDesktopPet
     // One control on a settings page. Bounds and mouse points are in page units (96 per inch).
     internal abstract class Widget
     {
-        public SettingsForm Form;
+        public SettingsPanel Form;
         public string Label;
+        public bool Stacked;   // Label above the control, rather than beside it.
         public Func<string> Caption;
         public RectangleF Bounds;
         public float RowTop, RowBottom;
         public Func<bool> Enabled = delegate { return true; };
         public virtual bool Interactive { get { return true; } }
+        // How wide the control is, or -1 to fill the row.
+        public virtual float NaturalWidth { get { return -1; } }
 
         // The height this widget needs at the given width.
         public abstract float Measure(float width);
@@ -615,7 +734,9 @@ namespace OnkeyDesktopPet
         public Toggle(Func<bool> get, Action<bool> set) { this.get = get; this.set = set; }
 
         public override float Measure(float width) { return H; }
-        public override RectangleF HitArea() { return new RectangleF(Bounds.Left - 200, Bounds.Top - 6, Bounds.Width + 200, Bounds.Height + 12); }
+        public override float NaturalWidth { get { return W; } }
+        // The whole row, label included.
+        public override RectangleF HitArea() { return RectangleF.FromLTRB(SettingsPanel.LabelLeft, RowTop, Bounds.Right, RowBottom); }
 
         public override void Paint(Graphics g, bool enabled, bool hover)
         {
@@ -634,7 +755,6 @@ namespace OnkeyDesktopPet
                 Sketch.Stroke(g, knob, Dim(Jungle.Ink, enabled), 1.8f);
             }
             if (on) Jungle.DrawLeaf(g, new PointF(knobX - 5, pod.Top + H / 2 + 2), -40, 13, 6, Dim(Jungle.LeafDark, enabled), seed);
-            Jungle.Text(g, on ? "on" : "off", Form.SmallFont, Dim(Jungle.Faded, enabled), new PointF(pod.Right + 8, pod.Top + 5));
         }
 
         public override void Up(PointF p) { if (HitArea().Contains(p)) set(!get()); }
@@ -787,9 +907,10 @@ namespace OnkeyDesktopPet
 
         public Stepper(int min, int max, Func<int> get, Action<int> set) { this.min = min; this.max = max; this.get = get; this.set = set; }
 
-        public override float Measure(float width) { return 40; }
-        private PointF Minus { get { return new PointF(Bounds.Left + 20, Bounds.Top + 20); } }
-        private PointF Plus { get { return new PointF(Bounds.Left + 130, Bounds.Top + 20); } }
+        public override float Measure(float width) { return 36; }
+        public override float NaturalWidth { get { return 118; } }
+        private PointF Minus { get { return new PointF(Bounds.Left + 17, Bounds.Top + 18); } }
+        private PointF Plus { get { return new PointF(Bounds.Right - 17, Bounds.Top + 18); } }
 
         public override void Paint(Graphics g, bool enabled, bool hover)
         {
@@ -798,15 +919,12 @@ namespace OnkeyDesktopPet
             Coconut(g, Plus, "+", (n < max), (pressedSide > 0));
             string text = n.ToString(CultureInfo.InvariantCulture);
             SizeF size = g.MeasureString(text, Form.TitleFont);
-            Jungle.Text(g, text, Form.TitleFont, Jungle.Ink, new PointF(Bounds.Left + 75 - size.Width / 2, Bounds.Top + 20 - size.Height / 2));
-            // Little bananas, one per Onkey (up to ten).
-            for (int i = 0; i < Math.Min(n, 10); i++)
-                Banana(g, new PointF(Bounds.Left + 168 + (i % 5) * 20, Bounds.Top + 10 + (i / 5) * 18), i);
+            Jungle.Text(g, text, Form.TitleFont, Jungle.Ink, new PointF(Bounds.Left + Bounds.Width / 2 - size.Width / 2, Bounds.Top + 18 - size.Height / 2));
         }
 
         private void Coconut(Graphics g, PointF c, string sign, bool enabled, bool down)
         {
-            using (GraphicsPath shell = Sketch.Circle(c, down ? 15 : 17, (int)c.X, 1f))
+            using (GraphicsPath shell = Sketch.Circle(c, down ? 13 : 15, (int)c.X, 1f))
             {
                 using (Brush b = new SolidBrush(Dim(Jungle.Bark, enabled))) g.FillPath(b, shell);
                 Sketch.Stroke(g, shell, Dim(Jungle.Ink, enabled), 2f);
@@ -819,17 +937,6 @@ namespace OnkeyDesktopPet
             }
         }
 
-        private static void Banana(Graphics g, PointF at, int seed)
-        {
-            using (GraphicsPath b = new GraphicsPath())
-            {
-                b.AddBezier(at.X, at.Y, at.X + 4, at.Y + 12, at.X + 12, at.Y + 12, at.X + 16, at.Y + 4);
-                b.AddBezier(at.X + 16, at.Y + 4, at.X + 11, at.Y + 8, at.X + 5, at.Y + 7, at.X, at.Y);
-                using (Brush fill = new SolidBrush(Jungle.Banana)) g.FillPath(fill, b);
-                using (Pen ink = new Pen(Jungle.Ink, 1.3f)) g.DrawPath(ink, b);
-            }
-        }
-
         private int SideAt(PointF p)
         {
             if (Distance(p, Minus) < 20) return -1;
@@ -839,7 +946,7 @@ namespace OnkeyDesktopPet
 
         private static float Distance(PointF a, PointF b) { return (float)Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y)); }
 
-        public override RectangleF HitArea() { return new RectangleF(Bounds.Left, Bounds.Top, 152, Bounds.Height); }
+        public override RectangleF HitArea() { return Bounds; }
         public override void Down(PointF p) { pressedSide = SideAt(p); }
         public override void Up(PointF p)
         {
@@ -856,13 +963,16 @@ namespace OnkeyDesktopPet
         private readonly Action click;
         private bool down;
 
+        public bool Small;
+
         public SketchButton(string text, Action click) { Text = delegate { return text; }; this.click = click; }
 
-        public override float Measure(float width) { return 40; }
+        public override float Measure(float width) { return Small ? 30 : 38; }
+        private Font Font { get { return Small ? Form.ChipFont : Form.LabelFont; } }
 
         private RectangleF Sign(Graphics g)
         {
-            float w = g.MeasureString(Text(), Form.LabelFont).Width + 36;
+            float w = g.MeasureString(Text(), Font).Width + (Small ? 22 : 36);
             return new RectangleF(Bounds.Left, Bounds.Top, w, Bounds.Height);
         }
 
@@ -880,8 +990,8 @@ namespace OnkeyDesktopPet
                 using (Brush b = new SolidBrush(Dim(hover ? Color.FromArgb(250, 212, 92) : Jungle.Banana, enabled))) g.FillPath(b, path);
                 Sketch.Stroke(g, path, Dim(Jungle.Ink, enabled), 2.2f);
             }
-            SizeF size = g.MeasureString(Text(), Form.LabelFont);
-            Jungle.Text(g, Text(), Form.LabelFont, Dim(Jungle.Ink, enabled), new PointF(r.Left + (r.Width - size.Width) / 2, r.Top + (r.Height - size.Height) / 2));
+            SizeF size = g.MeasureString(Text(), Font);
+            Jungle.Text(g, Text(), Font, Dim(Jungle.Ink, enabled), new PointF(r.Left + (r.Width - size.Width) / 2, r.Top + (r.Height - size.Height) / 2));
         }
 
         public override void Down(PointF p) { down = true; }
@@ -902,6 +1012,53 @@ namespace OnkeyDesktopPet
         public override void Paint(Graphics g, bool enabled, bool hover)
         {
             Jungle.Text(g, text(), Form.LabelFont, Jungle.Ink, new PointF(Bounds.Left, Bounds.Top + 1));
+        }
+    }
+
+    // A quick on/off switch along the top of the panel, like a pebble that turns green.
+    internal sealed class QuickToggle : Widget
+    {
+        private readonly string text;
+        private readonly Func<bool> get;
+        private readonly Action flip;
+        private bool down;
+
+        public QuickToggle(string text, Func<bool> get, Action flip) { this.text = text; this.get = get; this.flip = flip; }
+
+        public override float Measure(float width) { return 28; }
+
+        public float Width()
+        {
+            using (Bitmap b = new Bitmap(1, 1)) using (Graphics g = Graphics.FromImage(b))
+                return g.MeasureString(text, Form.ChipFont).Width + 30;
+        }
+
+        public override void Paint(Graphics g, bool enabled, bool hover)
+        {
+            bool on = get();
+            RectangleF r = Bounds;
+            if (down) r.Offset(0.5f, 1.5f);
+            using (GraphicsPath path = Sketch.Box(r, 13, Sketch.Seed(Bounds), 1.2f))
+            {
+                Color fill = on ? Jungle.Leaf : hover ? Color.FromArgb(255, 246, 222) : Jungle.Paper;
+                using (Brush b = new SolidBrush(fill)) g.FillPath(b, path);
+                Sketch.Stroke(g, path, Jungle.Ink, on ? 2.2f : 1.6f);
+            }
+            // A little dot: a banana when on, an empty seed when off.
+            using (GraphicsPath dot = Sketch.Circle(new PointF(r.Left + 12, r.Top + r.Height / 2), 4.5f, (int)r.X, 0.5f))
+            {
+                using (Brush b = new SolidBrush(on ? Jungle.Banana : Color.FromArgb(222, 208, 172))) g.FillPath(b, dot);
+                using (Pen ink = new Pen(Jungle.Ink, 1.2f)) g.DrawPath(ink, dot);
+            }
+            SizeF size = g.MeasureString(text, Form.ChipFont);
+            Jungle.Text(g, text, Form.ChipFont, on ? Jungle.Paper : Jungle.Ink, new PointF(r.Left + 21, r.Top + (r.Height - size.Height) / 2));
+        }
+
+        public override void Down(PointF p) { down = true; }
+        public override void Up(PointF p)
+        {
+            down = false;
+            if (Bounds.Contains(p)) flip();
         }
     }
 }
