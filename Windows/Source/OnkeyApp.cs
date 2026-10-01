@@ -251,6 +251,7 @@ namespace OnkeyDesktopPet
                 Header("Layer"),
                 Option("In front of all windows", "layer", "above"),
                 Option("On the desktop, behind windows", "layer", "desktop"),
+                Option("Stay in front of full-screen apps", "overFullScreen", "true"),
                 new ToolStripSeparator(),
                 Header("Eyes"),
                 Option("Watch my cursor", "watchCursor", "true"),

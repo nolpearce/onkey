@@ -123,8 +123,9 @@ namespace OnkeyDesktopPet
 
         public void BringToTop()
         {
-            // Like other always-on-top windows, he stays under full-screen videos and games.
-            if (IsHandleCreated && !FullScreenAppInFront()) Native.SetWindowPos(Handle, new IntPtr(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);   // HWND_TOPMOST, no size/move/activate.
+            // Unless asked otherwise, he stays under full-screen videos and games, like other
+            // always-on-top windows.
+            if (IsHandleCreated && (app.Settings.Bool("overFullScreen") || !FullScreenAppInFront())) Native.SetWindowPos(Handle, new IntPtr(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);   // HWND_TOPMOST, no size/move/activate.
         }
 
         private bool FullScreenAppInFront()
