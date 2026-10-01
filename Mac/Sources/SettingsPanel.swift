@@ -838,6 +838,6 @@ struct QuickToggle: View {
         .accessibilityLabel(title)
         .accessibilityValue(isOn ? "on" : "off")
         .accessibilityAddTraits(.isButton)
-        .accessibilityAction(flip)
+        .accessibilityAction { flip() }
     }
 }
