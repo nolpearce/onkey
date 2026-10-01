@@ -368,6 +368,10 @@ struct SettingsView: View {
         .frame(width: width, height: height + (selected ? 4 : 0))
         .contentShape(Rectangle())
         .onTapGesture { tab = i }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(tabs[i])
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityAction { tab = i }
         .offset(x: x, y: Self.cardTop - height + (selected ? 4 : 0))
     }
 
@@ -607,6 +611,10 @@ struct LeafSwitch: View {
         .opacity(enabled ? 1 : 0.4)
         .contentShape(Rectangle())
         .onTapGesture { if enabled { isOn.toggle() } }
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityValue(isOn ? "on" : "off")
+        .accessibilityAction { if enabled { isOn.toggle() } }
     }
 }
 
@@ -664,6 +672,14 @@ struct VineSlider: View {
         }
         .frame(height: 40)
         .opacity(enabled ? 1 : 0.4)
+        .accessibilityElement(children: .ignore)
+        .accessibilityValue("\(Int(((value - range.lowerBound) / (range.upperBound - range.lowerBound) * 100).rounded()))%")
+        .accessibilityAdjustableAction { direction in
+            guard enabled else { return }
+            let nudge = step > 0 ? step : (range.upperBound - range.lowerBound) / 20
+            let next = direction == .increment ? value + nudge : value - nudge
+            set(min(range.upperBound, max(range.lowerBound, next)))
+        }
     }
 
     private func valueAt(_ x: CGFloat, left: CGFloat, right: CGFloat) -> Double {
@@ -690,6 +706,10 @@ struct Chips: View {
                                           line: chosen ? 2.4 : 1.6))
                     .contentShape(Rectangle())
                     .onTapGesture { choose(options[i].value) }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(options[i].name)
+                    .accessibilityAddTraits(chosen ? [.isButton, .isSelected] : .isButton)
+                    .accessibilityAction { choose(options[i].value) }
             }
         }
     }
@@ -755,6 +775,10 @@ struct CoconutStepper: View {
         .opacity(enabled ? 1 : 0.35)
         .contentShape(Circle())
         .onTapGesture { if enabled { set(value + (plus ? 1 : -1)) } }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(plus ? "One more Onkey" : "One less Onkey")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { if enabled { set(value + (plus ? 1 : -1)) } }
     }
 }
 
@@ -783,6 +807,10 @@ struct SignButton: View {
                     if down { action() }
                     down = false
                 })
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(title)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction { if enabled { action() } }
     }
 }
 
@@ -806,5 +834,10 @@ struct QuickToggle: View {
         .background(SketchBox(radius: 13, seed: title.count * 29, fill: isOn ? Jungle.leaf : Jungle.paper, line: isOn ? 2.2 : 1.6, wobble: 1.2))
         .contentShape(Rectangle())
         .onTapGesture(perform: flip)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+        .accessibilityValue(isOn ? "on" : "off")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction(flip)
     }
 }

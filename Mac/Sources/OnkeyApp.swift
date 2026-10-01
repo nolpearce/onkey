@@ -216,8 +216,10 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
     }
 
     @objc private func statusItemClicked() {
-        guard let event = NSApp.currentEvent, let button = statusItem.button else { return }
-        if event.type == .rightMouseUp || event.modifierFlags.contains(.control) {
+        guard let button = statusItem.button else { return }
+        // VoiceOver's press arrives with no mouse event; treat it as a click.
+        let event = NSApp.currentEvent
+        if event?.type == .rightMouseUp || (event?.type == .leftMouseUp && event?.modifierFlags.contains(.control) == true) {
             settingsPanel?.close()
             statusItem.menu = menu
             button.performClick(nil)
