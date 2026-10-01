@@ -368,8 +368,9 @@ namespace OnkeyDesktopPet
             }
         }
 
-        // How squashed every Onkey is right now: 15% at each beat, springing back before the
-        // next one, faded in and out as music starts and stops.
+        // How squashed every Onkey is right now. He squashes down just before each beat so the
+        // deepest point (15%) lands exactly on it, then springs back more slowly; faded in and
+        // out as music starts and stops.
         private float BeatSquash(double now, double dt)
         {
             if (Settings.Bool("dance")) listener.Poll(now);
@@ -379,8 +380,17 @@ namespace OnkeyDesktopPet
             if (danceLevel <= 0.001 || beat.Period <= 0) return 0;
             double phase = ((now - beat.LastBeat) / beat.Period) % 1;
             if (phase < 0) phase += 1;
-            double pulse = phase < 0.06 ? phase / 0.06 : Math.Exp(-(phase - 0.06) * 5.5);
-            return (float)(0.15 * danceLevel * pulse);
+            return (float)(0.15 * danceLevel * BopShape(phase));
+        }
+
+        // 0...1 over one beat, peaking at 1 on the beat (phase 0): eases down over the last 20%
+        // of the beat before, and back up over the first 45% after.
+        private static double BopShape(double phase)
+        {
+            double fromBeat = phase < 0.5 ? phase : phase - 1;   // Negative before the beat.
+            double width = fromBeat < 0 ? 0.2 : 0.45;
+            if (Math.Abs(fromBeat) >= width) return 0;
+            return 0.5 + 0.5 * Math.Cos(Math.PI * fromBeat / width);
         }
 
         private void StartListening()

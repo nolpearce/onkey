@@ -340,8 +340,9 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
         CATransaction.commit()
     }
 
-    // How squashed every Onkey is right now: 15% at each beat, springing back before the
-    // next one, faded in and out as music starts and stops.
+    // How squashed every Onkey is right now. He squashes down just before each beat so the
+    // deepest point (15%) lands exactly on it, then springs back more slowly; faded in and
+    // out as music starts and stops.
     private func beatSquash(now: Double, dt: Double) -> CGFloat {
         let beat = listener.current
         if beat.active != heardBeat {
@@ -353,8 +354,16 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
         guard danceLevel > 0.001, beat.period > 0 else { return 0 }
         var phase = ((now - beat.lastBeat) / beat.period).truncatingRemainder(dividingBy: 1)
         if phase < 0 { phase += 1 }
-        let pulse = phase < 0.06 ? phase / 0.06 : exp(-(phase - 0.06) * 5.5)
-        return CGFloat(0.15 * danceLevel * pulse)
+        return CGFloat(0.15 * danceLevel * Self.bopShape(phase))
+    }
+
+    // 0...1 over one beat, peaking at 1 on the beat (phase 0): eases down over the last 20%
+    // of the beat before, and back up over the first 45% after.
+    static func bopShape(_ phase: Double) -> Double {
+        let fromBeat = phase < 0.5 ? phase : phase - 1   // Negative before the beat.
+        let width = fromBeat < 0 ? 0.2 : 0.45
+        guard abs(fromBeat) < width else { return 0 }
+        return 0.5 + 0.5 * cos(Double.pi * fromBeat / width)
     }
 
     private func startListening() {

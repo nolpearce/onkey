@@ -1,4 +1,4 @@
-ONKEY DESKTOP PET - VERSION 4.3.1 - WINDOWS
+ONKEY DESKTOP PET - VERSION 4.3.2 - WINDOWS
 
 START
 1. Exit any older Onkey from its tray icon first.
