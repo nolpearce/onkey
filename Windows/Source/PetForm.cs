@@ -121,6 +121,27 @@ namespace OnkeyDesktopPet
             if (IsHandleCreated) Native.SetWindowPos(Handle, new IntPtr(1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);   // HWND_BOTTOM, no size/move/activate.
         }
 
+        public void BringToTop()
+        {
+            // Unless asked otherwise, he stays under full-screen videos and games, like other
+            // always-on-top windows.
+            if (IsHandleCreated && (app.Settings.Bool("overFullScreen") || !FullScreenAppInFront())) Native.SetWindowPos(Handle, new IntPtr(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);   // HWND_TOPMOST, no size/move/activate.
+        }
+
+        private bool FullScreenAppInFront()
+        {
+            IntPtr front = Native.GetForegroundWindow();
+            if (front == IntPtr.Zero || front == Handle) return false;
+            // The desktop itself covers the screen too.
+            System.Text.StringBuilder name = new System.Text.StringBuilder(32);
+            Native.GetClassName(front, name, name.Capacity);
+            if (name.ToString() == "Progman" || name.ToString() == "WorkerW") return false;
+            Native.Rect r;
+            if (!Native.GetWindowRect(front, out r)) return false;
+            Rectangle screen = Screen.FromHandle(Handle).Bounds;
+            return r.Left <= screen.Left && r.Top <= screen.Top && r.Right >= screen.Right && r.Bottom >= screen.Bottom;
+        }
+
         // After a size change: keep him centred where he was, at the new size.
         public void Resized(int oldWidth, int oldHeight)
         {
