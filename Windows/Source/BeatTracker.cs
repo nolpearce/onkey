@@ -6,9 +6,9 @@ namespace OnkeyDesktopPet
     // Finds the beat in whatever audio it's fed. Every 10 ms it measures how much the sound
     // suddenly got louder (spectral flux) in four frequency bands: kick drums, bass and low
     // percussion, snares/bells/guitar, and hi-hats/shakers. Each band's hits are checked for how
-    // regularly they repeat, and the steadiest bands get the most say in the tempo, so a song
-    // driven by a cowbell is followed as well as one driven by a kick. Where the beat lands also
-    // leans on bass thumps, since kick drums mark the beat while hi-hats often sit on the
+    // regularly they repeat over a bar, and the steadiest bands get the most say in the tempo, so
+    // a song driven by a cowbell is followed as well as one driven by a kick. Where the beat lands
+    // also leans on bass thumps, since kick drums mark the beat while hi-hats often sit on the
     // off-beat. Mirrors BeatTracker.swift on Mac.
     public sealed class BeatTracker
     {
@@ -21,9 +21,13 @@ namespace OnkeyDesktopPet
         }
 
         private const double HopsPerSecond = 100;
-        private const int HistoryHops = 600;          // 6 seconds of onsets.
+        private const int HistoryHops = 800;          // 8 seconds of onsets.
         private const int MinLag = 30, MaxLag = 100;  // 200 down to 60 beats per minute.
+        private const int Multiples = 4;              // A tempo is checked over this many beats (a bar).
+        // How loud the music has been lately is remembered as a peak that slowly falls away.
+        private const double LevelFall = 0.9985;      // Per hop: halves in about 4.6 seconds.
         private static readonly double[] BandEdges = { 0, 150, 600, 3000 };   // Hz where each band starts.
+        private static readonly double[] Blur = { 1, 0.7, 0.25 };              // Onset smoothing, by hops away.
 
         private readonly double sampleRate;
         private readonly int hop;
@@ -34,12 +38,12 @@ namespace OnkeyDesktopPet
         private readonly double[] previous;
         private readonly int[] bandOf;                 // Which band each FFT bin belongs to.
         private readonly double[][] bandOnsets;
-        private double fullSum;
+        private double fullSum, level = 1e-6;
         private int count;
         // Low-pass filter (around 150 Hz) for the bass thumps.
         private readonly double b0, b1, b2, a1, a2;
         private double x1, x2, y1, y2;
-        private double bassSum, lastBassLog;
+        private double bassSum, lastBassLog, bassLevel = 1e-10;
         private readonly double[] bassOnsets = new double[HistoryHops];
         private readonly double[] loudness = new double[HistoryHops];
         private int write, hopsSeen;
@@ -96,17 +100,29 @@ namespace OnkeyDesktopPet
 
         private void FinishHop(double time)
         {
-            // Log-compressed spectrum of the latest slice; the flux is how much it rose since the last.
+            // Log-compressed spectrum of the latest slice, measured against how loud the music
+            // has been lately so every song is compressed alike however loud it is (against full
+            // scale, held chords that slowly wobble were often taken for a beat); the flux is how
+            // much it rose since the last.
             double[] magnitudes = fft.Magnitudes(ring, ringWrite);
+            double average = 0;
+            for (int k = 1; k < magnitudes.Length; k++) average += magnitudes[k];
+            average /= magnitudes.Length - 1;
+            level = Math.Max(1e-6, Math.Max(average, level * LevelFall));
+            double gain = 1 / level;
             double[] flux = new double[BandEdges.Length];
             for (int k = 1; k < magnitudes.Length; k++)
             {
-                double m = Math.Log(1 + 100 * magnitudes[k]);
+                double m = Math.Log(1 + gain * magnitudes[k]);
                 flux[bandOf[k]] += Math.Max(0, m - previous[k]);
                 previous[k] = m;
             }
             for (int b = 0; b < flux.Length; b++) bandOnsets[b][write] = flux[b];
-            double bassLog = Math.Log(bassSum / hop + 1e-10);
+            // Bass thumps, also against how loud the bass has been lately, so a soft pickup note
+            // after a gap doesn't count as much as the downbeat.
+            double bassPower = bassSum / hop;
+            bassLevel = Math.Max(1e-10, Math.Max(bassPower, bassLevel * LevelFall));
+            double bassLog = Math.Log(1 + 30 * bassPower / bassLevel);
             bassOnsets[write] = Math.Max(0, bassLog - lastBassLog);
             lastBassLog = bassLog;
             loudness[write] = fullSum / hop;
@@ -117,13 +133,15 @@ namespace OnkeyDesktopPet
         }
 
         // Onsets oldest first, keeping only what stands above the local average (so a loud
-        // stretch doesn't count as one long hit), then with the overall average removed.
+        // stretch doesn't count as one long hit), blurred over a few hops (so a drummer a
+        // little early or late still lines up with the beat before), then with the overall
+        // average removed.
         private double[] History(double[] source)
         {
             int n = Math.Min(hopsSeen, HistoryHops);
             double[] raw = new double[n];
             for (int i = 0; i < n; i++) raw[i] = source[(write - n + i + HistoryHops) % HistoryHops];
-            double[] o = new double[n];
+            double[] peaks = new double[n];
             double windowSum = 0;
             const int half = 12;
             for (int i = 0; i < Math.Min(n, half); i++) windowSum += raw[i];
@@ -132,10 +150,22 @@ namespace OnkeyDesktopPet
                 if (i + half < n) windowSum += raw[i + half];
                 if (i - half - 1 >= 0) windowSum -= raw[i - half - 1];
                 int width = Math.Min(n - 1, i + half) - Math.Max(0, i - half) + 1;
-                o[i] = Math.Max(0, raw[i] - windowSum / width);
+                peaks[i] = Math.Max(0, raw[i] - windowSum / width);
             }
+            double[] o = new double[n];
             double mean = 0;
-            foreach (double v in o) mean += v;
+            for (int i = 0; i < n; i++)
+            {
+                double s = 0, w = 0;
+                for (int j = -Blur.Length + 1; j < Blur.Length; j++)
+                {
+                    if (i + j < 0 || i + j >= n) continue;
+                    double k = Blur[Math.Abs(j)];
+                    s += peaks[i + j] * k; w += k;
+                }
+                o[i] = s / w;
+                mean += o[i];
+            }
             mean /= Math.Max(1, n);
             for (int i = 0; i < n; i++) o[i] -= mean;
             return o;
@@ -148,6 +178,14 @@ namespace OnkeyDesktopPet
             return Math.Max(1e-9, Math.Sqrt(sum / Math.Max(1, v.Length)));
         }
 
+        // How much a lag (in hops) is favoured as the beat: most around 120 beats per minute, so a
+        // beat isn't mistaken for half or double itself.
+        private static double Prior(int lag)
+        {
+            double octaves = Math.Log(lag / 50.0, 2);
+            return Math.Exp(-0.5 * octaves * octaves / 0.8);
+        }
+
         private void Analyse(double now)
         {
             if (hopsSeen < 300) return;   // Needs 3 seconds to judge a tempo.
@@ -155,26 +193,44 @@ namespace OnkeyDesktopPet
             for (int i = 1; i <= 100; i++) recentLoudness += loudness[(write - i + HistoryHops) % HistoryHops];
             double rms = Math.Sqrt(recentLoudness / 100);
 
-            // Each band's self-similarity at every lag. A band's say in the tempo grows with how
-            // regular it is (the square of its best match), so steady instruments lead.
+            // Each band's self-similarity half a beat and one, two, three and four beats later,
+            // averaged. Checking a whole bar matters for syncopated grooves (clave, dembow,
+            // tumbao), where little repeats exactly one beat later but everything repeats a bar
+            // later; checking only one beat let a part that repeats every dotted beat win, giving
+            // two-thirds or four-thirds of the tempo. The half beat favours the real beat over a
+            // dotted one, since nearly every groove has eighth notes. A band's say in the tempo
+            // grows with how regular it is (the square of its best match), so steady instruments
+            // lead.
             double[][] bands = new double[bandOnsets.Length][];
             for (int b = 0; b < bands.Length; b++) bands[b] = History(bandOnsets[b]);
             int n = bands[0].Length;
+            int longest = Math.Min(Multiples * (MaxLag + 1), n / 2);
             double[] scores = new double[MaxLag + 2];
             double[] weights = new double[bands.Length];
+            double[] similarity = new double[longest + 1];
             for (int b = 0; b < bands.Length; b++)
             {
                 double[] o = bands[b];
                 double r0 = 0;
                 foreach (double v in o) r0 += v * v;
                 if (r0 <= 0) continue;
+                r0 /= n;
+                // Averaged per overlapping pair, so long lags (slow songs) aren't marked down
+                // for overlapping less.
+                for (int lag = (MinLag - 1) / 2; lag <= longest; lag++)
+                {
+                    double r = 0;
+                    for (int i = lag; i < n; i++) r += o[i] * o[i - lag];
+                    similarity[lag] = r / (n - lag) / r0;
+                }
                 double[] own = new double[MaxLag + 2];
                 double peak = 0;
                 for (int lag = MinLag - 1; lag <= MaxLag + 1; lag++)
                 {
-                    double r = 0;
-                    for (int i = lag; i < n; i++) r += o[i] * o[i - lag];
-                    own[lag] = r / r0;
+                    double sum = similarity[(lag + 1) / 2];
+                    int used = 1;
+                    for (int k = 1; k <= Multiples && k * lag <= longest; k++) { sum += similarity[k * lag]; used++; }
+                    own[lag] = sum / used;
                     if (lag >= MinLag && lag <= MaxLag) peak = Math.Max(peak, own[lag]);
                 }
                 weights[b] = peak * peak;
@@ -189,20 +245,18 @@ namespace OnkeyDesktopPet
                 return;
             }
             for (int lag = 0; lag < scores.Length; lag++) scores[lag] /= totalWeight;
-            // Tempo: the lag with the strongest self-similarity, nudged toward ~120 BPM so a beat
-            // isn't mistaken for half or double itself.
+            // Tempo: the lag with the strongest self-similarity, nudged toward ~120 BPM.
             int bestLag = MinLag;
             double bestScore = double.NegativeInfinity;
             for (int lag = MinLag; lag <= MaxLag; lag++)
             {
-                double octaves = Math.Log(lag / 50.0, 2);
-                double weighted = scores[lag] * Math.Exp(-0.5 * octaves * octaves / 0.8);
+                double weighted = scores[lag] * Prior(lag);
                 if (weighted > bestScore) { bestScore = weighted; bestLag = lag; }
             }
-            // Confidence: how closely the onsets match themselves one beat later. Real music
-            // measured 0.25-0.7, clean beats up to 0.9, and beatless noise mostly under 0.2. It
-            // takes 0.38 to start dancing but only dropping under 0.2 to stop, so quieter
-            // passages don't interrupt a song.
+            // Confidence: how closely the onsets match themselves over the next bar. Test grooves
+            // (pop, house, salsa, bossa nova, reggaeton, cumbia, quiet ballads) measured 0.35-0.65,
+            // and noise or notes played at random under 0.1. It takes 0.38 to start dancing but
+            // only dropping under 0.2 to stop, so quieter passages don't interrupt a song.
             double confidence = scores[bestLag];
             // Parabolic fit between neighbouring lags for a fractional period.
             double l = scores[bestLag - 1], c = scores[bestLag], rr = scores[bestLag + 1];
