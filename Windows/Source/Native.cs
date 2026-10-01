@@ -72,6 +72,7 @@ namespace OnkeyDesktopPet
     {
         [StructLayout(LayoutKind.Sequential)] internal struct Point { public int X, Y; public Point(int x, int y) { X = x; Y = y; } }
         [StructLayout(LayoutKind.Sequential)] internal struct Size { public int Width, Height; public Size(int w, int h) { Width = w; Height = h; } }
+        [StructLayout(LayoutKind.Sequential)] internal struct Rect { public int Left, Top, Right, Bottom; }
         [StructLayout(LayoutKind.Sequential, Pack = 1)] internal struct Blend { public byte Operation, Flags, Alpha, Format; }
         [StructLayout(LayoutKind.Sequential)] internal struct BitmapInfo
         {
@@ -84,6 +85,9 @@ namespace OnkeyDesktopPet
         [DllImport("user32.dll")] internal static extern int GetWindowLong(IntPtr window, int index);
         [DllImport("user32.dll")] internal static extern int SetWindowLong(IntPtr window, int index, int value);
         [DllImport("user32.dll")] internal static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int cx, int cy, uint flags);
+        [DllImport("user32.dll")] internal static extern IntPtr GetForegroundWindow();
+        [DllImport("user32.dll")] internal static extern bool GetWindowRect(IntPtr window, out Rect rect);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] internal static extern int GetClassName(IntPtr window, System.Text.StringBuilder name, int size);
         [DllImport("user32.dll")] internal static extern bool DestroyIcon(IntPtr icon);
         [DllImport("gdi32.dll")] internal static extern bool GdiFlush();
         [DllImport("gdi32.dll", SetLastError = true)] internal static extern IntPtr CreateCompatibleDC(IntPtr dc);
