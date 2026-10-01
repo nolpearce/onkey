@@ -19,6 +19,7 @@ This builds `Onkey.app`, installs it in `/Applications` and launches it. Click t
 - **Where Onkey Goes**: anywhere, along an edge, or stay put; how often he walks to your mouse; walking speed
 - **Sound**: on/off, how often, volume, play now. His mouth opens while he makes the sound
 - **Appearance**: size, opacity, in front of windows or on the desktop; eyes that watch your cursor; blinking
+- **Check for Updates**: finds a newer release here on GitHub, then downloads it and restarts Onkey with your settings kept. He also checks on his own every few hours (you can turn that off)
 - **Let Me Drag Onkey Around**, **Open Onkey at Login**, **Pause**, **Quit**
 
 Or download `Onkey-Mac.zip` from [Releases](https://github.com/nolpearce/onkey/releases), unzip it and drag `Onkey.app` into Applications. It runs on Apple Silicon and Intel Macs with macOS 13 or later.
@@ -41,3 +42,11 @@ package.sh   builds both release downloads into dist/
 The two versions mirror each other file for file where they can (for example
 `Mac/Sources/BeatTracker.swift` and `Windows/Source/BeatTracker.cs`), so a change to one
 usually wants the same change in the other.
+
+## Releasing
+
+Bump the version in `Mac/build.sh` (`CFBundleShortVersionString`, and `CFBundleVersion`),
+`Windows/Source/Program.cs` (`Version`) and both README.txt files, run `./package.sh`, then
+publish a GitHub release tagged `vX.Y.Z` with `Onkey-Mac.zip` and `Onkey-Windows.zip` attached
+under exactly those names. Running Onkeys compare their version with the latest release's tag
+and offer the update from the menu.

@@ -6,6 +6,7 @@ enum Key {
     static let size = "size", opacity = "opacity", layer = "layer", draggable = "draggable"
     static let watchCursor = "watchCursor", blink = "blink"
     static let count = "count", dance = "dance"
+    static let checkUpdates = "checkUpdates"
     static let savedX = "savedX", savedY = "savedY"
 }
 
