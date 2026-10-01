@@ -27,6 +27,9 @@ namespace OnkeyDesktopPet
         public readonly OnkeySound Sound;
         public Bitmap[] Frames = new Bitmap[0];
         public float[] FrameBounce = new float[0];
+        // The lowest opaque row of each frame (points, unscaled): where his hands end.
+        public float[] FrameBottom = new float[0];
+        public float IdleBottom = OnkeyRenderer.CanvasHeight;
         public Bitmap Idle;
         public RectangleF PetBounds = new RectangleF(0, 0, OnkeyRenderer.CanvasWidth, OnkeyRenderer.CanvasHeight);
         // Seconds Onkey has been awake; stops while paused.
@@ -129,6 +132,7 @@ namespace OnkeyDesktopPet
             bool blank = Watching;
             Bitmap[] rendered = new Bitmap[OnkeyRenderer.FrameCount];
             float[] bounce = new float[OnkeyRenderer.FrameCount];
+            float[] bottom = new float[OnkeyRenderer.FrameCount];
             RectangleF bounds = RectangleF.Empty;
             for (int i = 0; i < rendered.Length; i++)
             {
@@ -136,13 +140,16 @@ namespace OnkeyDesktopPet
                 rendered[i] = Renderer.Render(p, true, s, blank);
                 bounce[i] = OnkeyRenderer.Bounce(p, true);
                 RectangleF b = OnkeyRenderer.OpaqueBounds(rendered[i], s);
+                bottom[i] = b.Bottom;
                 bounds = bounds.IsEmpty ? b : RectangleF.Union(bounds, b);
             }
             Bitmap still = Renderer.Render(0, false, s, blank);
-            bounds = RectangleF.Union(bounds, OnkeyRenderer.OpaqueBounds(still, s));
+            RectangleF stillBounds = OnkeyRenderer.OpaqueBounds(still, s);
+            bounds = RectangleF.Union(bounds, stillBounds);
             Bitmap[] oldFrames = Frames;
             Bitmap oldIdle = Idle;
-            Frames = rendered; FrameBounce = bounce; Idle = still; PetBounds = bounds;
+            Frames = rendered; FrameBounce = bounce; FrameBottom = bottom; Idle = still; IdleBottom = stillBounds.Bottom;
+            PetBounds = bounds;
             foreach (PetForm pet in pets) pet.FramesChanged();
             foreach (Bitmap f in oldFrames) f.Dispose();
             if (oldIdle != null) oldIdle.Dispose();

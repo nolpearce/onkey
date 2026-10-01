@@ -60,7 +60,6 @@ final class Pet {
         }
         view.onClick = { [weak self] in self?.playSound(force: true) }
         window.contentView = view
-        updateBase()
         applyAppearance()
         clampToArea()
         pickTarget()
@@ -89,7 +88,7 @@ final class Pet {
         let center = NSPoint(x: px + Double(oldSize.width) / 2, y: py + Double(oldSize.height) / 2)
         window.setContentSize(windowSize)
         view.frame = NSRect(origin: .zero, size: windowSize)
-        updateBase()
+        shown = nil
         forgetShown()
         px = center.x - windowSize.width / 2
         py = center.y - windowSize.height / 2
@@ -98,12 +97,7 @@ final class Pet {
         present(app.idle)
     }
 
-    func framesChanged() { shown = nil; updateBase(); forgetShown(); present(app.idle) }
-
-    // The bottom of his hands, which stays put when he bops.
-    private func updateBase() {
-        view.setBase((OnkeyRenderer.canvas.height - app.petBounds.maxY) * size)
-    }
+    func framesChanged() { shown = nil; forgetShown(); present(app.idle) }
 
     // Squashes him for the beat (0 normal, 0.15 is 15% shorter).
     func bop(_ squash: CGFloat) {
@@ -180,11 +174,17 @@ final class Pet {
         let frames = app.frames
         let index = Int(phase / (2 * .pi) * Double(frames.count)) % frames.count
         present(frames[index], bounce: OnkeyRenderer.bounce(phase: Double(index) / Double(frames.count) * 2 * .pi,
-                                                            walking: true))
+                                                            walking: true), bottom: app.frameBottoms[index])
     }
 
-    func present(_ image: CGImage, bounce: CGFloat = 0) {
-        if shown !== image { view.show(image, scale: app.pixelScale / size); shown = image }
+    // bottom: the frame's lowest opaque row (canvas points, y-down); nil for the idle frame.
+    func present(_ image: CGImage, bounce: CGFloat = 0, bottom: CGFloat? = nil) {
+        if shown !== image {
+            view.show(image, scale: app.pixelScale / size)
+            // The bottom of his hands in this frame, which stays put when he bops.
+            view.setBase((OnkeyRenderer.canvas.height - (bottom ?? app.idleBottom)) * size)
+            shown = image
+        }
         shownBounce = bounce
         let origin = NSPoint(x: px.rounded(), y: py.rounded())
         if origin != shownOrigin { window.setFrameOrigin(origin); shownOrigin = origin }

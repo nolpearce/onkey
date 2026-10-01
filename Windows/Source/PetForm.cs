@@ -29,6 +29,8 @@ namespace OnkeyDesktopPet
         private readonly PointF[] gaze = new PointF[2];
         private Bitmap current;
         private float currentBounce;
+        // The bottom of his hands in the frame on show (points, unscaled).
+        private float currentBottom;
         private int canvasWidth, canvasHeight;   // Window size in pixels.
         // What's on screen now, so unchanged frames are skipped (resting Onkeys cost nothing).
         private Bitmap shownFrame;
@@ -93,7 +95,7 @@ namespace OnkeyDesktopPet
         public void FramesChanged()
         {
             canvasWidth = app.Idle.Width; canvasHeight = app.Idle.Height;
-            current = app.Idle; currentBounce = 0;
+            current = app.Idle; currentBounce = 0; currentBottom = app.IdleBottom;
             ClientSize = new System.Drawing.Size(canvasWidth, canvasHeight);
             if (surface != null) { surface.Dispose(); surface = null; }
             if (IsHandleCreated) surface = new LayeredSurface(canvasWidth, canvasHeight);
@@ -128,7 +130,7 @@ namespace OnkeyDesktopPet
             PickTarget();
         }
 
-        public void ShowIdle() { current = app.Idle; currentBounce = 0; }
+        public void ShowIdle() { current = app.Idle; currentBounce = 0; currentBottom = app.IdleBottom; }
         public void RestFor(double seconds) { restUntil = app.Clock + seconds; }
         public void RescheduleSound() { nextSound = app.Clock + app.SoundDelay(); }
 
@@ -213,7 +215,7 @@ namespace OnkeyDesktopPet
             phase = (phase + dt * 2 * Math.PI * 1.15 * speed / (42 * PixelScale)) % (2 * Math.PI);
             Bitmap[] frames = app.Frames;
             int index = ((int)(phase / (2 * Math.PI) * frames.Length)) % frames.Length;
-            current = frames[index]; currentBounce = app.FrameBounce[index];
+            current = frames[index]; currentBounce = app.FrameBounce[index]; currentBottom = app.FrameBottom[index];
         }
 
         // Eyes, eyelids and mouth
@@ -297,7 +299,7 @@ namespace OnkeyDesktopPet
                 {
                     // Bopping: squash everything toward the bottom of his hands, which stay put.
                     g.Clear(Color.Transparent);
-                    float baseY = app.PetBounds.Bottom * PixelScale;
+                    float baseY = currentBottom * PixelScale;
                     g.TranslateTransform(0, baseY);
                     g.ScaleTransform(1, 1 - Squash);
                     g.TranslateTransform(0, -baseY);
