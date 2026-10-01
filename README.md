@@ -2,7 +2,7 @@
 
 A little desktop pet that wanders around your screen going "oooo". Just for fun :)
 
-![Onkey walking](Preview.gif)
+![Onkey walking](Assets/Preview.gif)
 
 ## Mac
 
@@ -14,6 +14,7 @@ Needs the Xcode Command Line Tools (`xcode-select --install`).
 
 This builds `Onkey.app`, installs it in `/Applications` and launches it. Click the Onkey head in the menu bar to:
 
+- **Dance to Music**: every Onkey bops (squashes down 15%) on the beat of whatever's playing
 - **How Many Onkeys**: one, two, three, five, or ten (chaos), each wandering on his own
 - **Where Onkey Goes**: anywhere, along an edge, or stay put; how often he walks to your mouse; walking speed
 - **Sound**: on/off, how often, volume, play now. His mouth opens while he makes the sound
@@ -22,17 +23,21 @@ This builds `Onkey.app`, installs it in `/Applications` and launches it. Click t
 
 Or download `Onkey-Mac.zip` from [Releases](https://github.com/nolpearce/onkey/releases), unzip it and drag `Onkey.app` into Applications. It runs on Apple Silicon and Intel Macs with macOS 13 or later.
 The first time, macOS will say it can't check the app: click **Done**, then go to **System Settings → Privacy & Security** and click **Open Anyway**.
-More detail is in [Mac/README-Mac.txt](Mac/README-Mac.txt).
+More detail is in [Mac/README.txt](Mac/README.txt).
 
 ## Windows
 
-Download `Onkey-Windows.zip` from [Releases](https://github.com/nolpearce/onkey/releases) (or clone this repo), extract it, and double-click `Start Onkey.vbs`. Then right-click Onkey's icon beside the clock. The menu has the same settings as the Mac version. See [README.txt](README.txt).
+Download `Onkey-Windows.zip` from [Releases](https://github.com/nolpearce/onkey/releases) and extract it, or clone this repo, then double-click `Start Onkey.vbs` (in `Windows\` in the repo). Then right-click Onkey's icon beside the clock. The menu has the same settings as the Mac version. See [Windows/README.txt](Windows/README.txt).
 
-## Files
+## Layout
 
-| Path | What it is |
-|---|---|
-| `Onkey.png` | The sprite. Both versions draw every frame from it live |
-| `Sounds/oooo.wav` | His sound |
-| `Mac/Onkey.swift`, `Mac/build.sh` | The Mac app and its build script |
-| `Onkey.cs`, `Start Onkey.ps1`, `Start Onkey.vbs` | The Windows version, compiled by PowerShell at launch |
+```
+Assets/      Onkey.png (the sprite both versions draw from), Sounds/, Preview.gif
+Mac/         Sources/*.swift, build.sh (builds and installs Onkey.app), README.txt
+Windows/     Source/*.cs, Start Onkey.vbs / .ps1 (compile and run at launch), README.txt
+package.sh   builds both release downloads into dist/
+```
+
+The two versions mirror each other file for file where they can (for example
+`Mac/Sources/BeatTracker.swift` and `Windows/Source/BeatTracker.cs`), so a change to one
+usually wants the same change in the other.

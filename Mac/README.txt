@@ -1,10 +1,15 @@
-ONKEY DESKTOP PET - MAC - VERSION 4.2
+ONKEY DESKTOP PET - MAC - VERSION 4.3
 
 START
 Open Onkey from your Applications folder (or Launchpad / Spotlight).
 Click the little Onkey head in the menu bar (top right of the screen) for:
 
   Pause Onkey
+  Dance to Music     Onkeys bop (squash down 15%) on the beat of whatever
+                     your Mac is playing. The first time, macOS asks whether
+                     Onkey may listen to system audio (on macOS 13-14.1 it
+                     uses the microphone instead). Nothing is recorded or sent
+                     anywhere.
   How Many Onkeys    one, two, three, five, or ten (chaos). Each wanders,
                      blinks and "oooo"s on his own.
   Where Onkey Goes   anywhere, along the bottom/top, left/right side, or stay
@@ -30,12 +35,22 @@ On macOS 14 or older you can instead right-click Onkey.app > Open > Open.
 You only need to do this once.
 
 REBUILDING
-After changing Onkey.swift, Onkey.png or the sound, run in Terminal:
+After changing anything in Sources/ or ../Assets, run in Terminal:
     ./build.sh
 It rebuilds, replaces /Applications/Onkey.app, and relaunches him.
 Requires the Xcode Command Line Tools (xcode-select --install).
 
+SOURCES
+  main.swift            starts the app (plus --export / --beat-test checks)
+  OnkeyApp.swift        menu bar menu, settings, timer, and the Onkeys
+  Pet.swift             one Onkey: walking, eyes, blinks, mouth, bopping
+  PetView.swift         draws one Onkey (body, pupils, lids, mouth)
+  Renderer.swift        draws his frames from Onkey.png
+  Settings.swift        setting names and cached values
+  BeatTracker.swift     finds the beat in audio
+  MusicListener.swift   hears what the Mac is playing
+
 NOTES
-Onkey is drawn live from Onkey.png using the same arm-swing animation as the
-Windows version, so he stays sharp at any size and on Retina screens. The
-Frames folder is only used by the Windows version.
+Onkey is drawn live from ../Assets/Onkey.png using the same arm-swing
+animation as the Windows version, so he stays sharp at any size and on Retina
+screens.

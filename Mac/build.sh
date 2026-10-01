@@ -5,6 +5,7 @@
 set -euo pipefail
 here="${0:A:h}"
 root="${here:h}"
+assets="$root/Assets"
 app="$here/Onkey.app"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
@@ -14,17 +15,17 @@ mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 
 echo "Compiling for Apple silicon and Intel..."
 for arch in arm64 x86_64; do
-    swiftc -O -target "$arch-apple-macos13.0" -o "$work/Onkey-$arch" "$here/Onkey.swift" -framework AppKit -framework AVFoundation
+    swiftc -O -target "$arch-apple-macos13.0" -o "$work/Onkey-$arch" "$here"/Sources/*.swift -framework AppKit -framework AVFoundation -framework CoreAudio
 done
 lipo -create "$work/Onkey-arm64" "$work/Onkey-x86_64" -output "$app/Contents/MacOS/Onkey"
 mkdir -p "$app/Contents/Resources/Sounds"
-cp "$root/Onkey.png" "$app/Contents/Resources/"
-cp "$root/Sounds/oooo.wav" "$app/Contents/Resources/Sounds/"
+cp "$assets/Onkey.png" "$app/Contents/Resources/"
+cp "$assets/Sounds/oooo.wav" "$app/Contents/Resources/Sounds/"
 
 echo "Making icon..."
 iconset="$work/AppIcon.iconset"
 mkdir -p "$iconset"
-sips -p 2000 2000 "$root/Onkey.png" --out "$work/square.png" >/dev/null
+sips -p 2000 2000 "$assets/Onkey.png" --out "$work/square.png" >/dev/null
 for size in 16 32 128 256 512; do
     sips -z $size $size "$work/square.png" --out "$iconset/icon_${size}x${size}.png" >/dev/null
     sips -z $((size * 2)) $((size * 2)) "$work/square.png" --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
@@ -42,11 +43,13 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
     <key>CFBundleExecutable</key><string>Onkey</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleVersion</key><string>6</string>
-    <key>CFBundleShortVersionString</key><string>4.2</string>
+    <key>CFBundleVersion</key><string>7</string>
+    <key>CFBundleShortVersionString</key><string>4.3</string>
     <key>LSMinimumSystemVersion</key><string>13.0</string>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
+    <key>NSAudioCaptureUsageDescription</key><string>Onkey listens to the music you're playing so he can bop to the beat. Nothing is recorded or sent anywhere.</string>
+    <key>NSMicrophoneUsageDescription</key><string>Onkey listens for music so he can bop to the beat. Nothing is recorded or sent anywhere.</string>
 </dict>
 </plist>
 PLIST
