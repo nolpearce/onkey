@@ -2,6 +2,9 @@
 
 A little desktop pet that wanders around your screen going "oooo". Just for fun :)
 
+The Onkey isn't my idea: he comes from the Instagram creator **Nobey One**. I just thought
+it would be fun to have him wandering around my desktop, so I made this.
+
 ![Onkey walking](Assets/Preview.gif)
 
 ## Mac

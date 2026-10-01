@@ -280,15 +280,24 @@ namespace OnkeyDesktopPet
                 g.InterpolationMode = InterpolationMode.HighQualityBilinear;
                 g.PixelOffsetMode = PixelOffsetMode.HighQuality;
                 ToSprite(g, s, Bounce(phase, walking));
-                // Alternating planted and lifted hands propel the head forward.
-                float swing = walking ? (float)(18 * Math.Sin(phase)) : 0f;
-                DrawArm(g, scaledLeft, new PointF(633, 808), -16f + swing, preparedK);
-                DrawArm(g, scaledRight, new PointF(1147, 808), 16f + swing, preparedK);
-                // Cover each rotating joint with a small patch of matching arm colour.
-                using (Brush joint = new SolidBrush(Color.FromArgb(157, 87, 47)))
+                if (walking)
                 {
-                    g.FillEllipse(joint, 612, 782, 60, 47);
-                    g.FillEllipse(joint, 1112, 782, 60, 47);
+                    // Alternating planted and lifted hands propel the head forward.
+                    float swing = (float)(18 * Math.Sin(phase));
+                    DrawArm(g, scaledLeft, new PointF(633, 808), -16f + swing, preparedK);
+                    DrawArm(g, scaledRight, new PointF(1147, 808), 16f + swing, preparedK);
+                    // Cover each rotating joint with a small patch of matching arm colour.
+                    using (Brush joint = new SolidBrush(Color.FromArgb(157, 87, 47)))
+                    {
+                        g.FillEllipse(joint, 612, 782, 60, 47);
+                        g.FillEllipse(joint, 1112, 782, 60, 47);
+                    }
+                }
+                else
+                {
+                    // At rest his arms lie flat and level, just as they're drawn.
+                    DrawLayer(g, scaledLeft, preparedK);
+                    DrawLayer(g, scaledRight, preparedK);
                 }
                 DrawLayer(g, blankEyes ? scaledBlank : scaledHead, preparedK);
             }

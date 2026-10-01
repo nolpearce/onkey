@@ -194,14 +194,20 @@ final class OnkeyRenderer {
         let bounce = Self.bounce(phase: phase, walking: walking)
         ctx.translateBy(x: (Self.canvas.width - Self.petWidth) / 2, y: 26 - bounce)
         ctx.scaleBy(x: scale, y: scale)
-        // Alternating planted and lifted hands propel the head forward.
-        let swing = walking ? 18 * sin(phase) : 0
-        drawArm(ctx, leftArm, pivot: CGPoint(x: 633, y: 808), degrees: -16 + swing)
-        drawArm(ctx, rightArm, pivot: CGPoint(x: 1147, y: 808), degrees: 16 + swing)
-        // Cover each rotating joint with a small patch of matching arm colour.
-        ctx.setFillColor(red: 157 / 255, green: 87 / 255, blue: 47 / 255, alpha: 1)
-        ctx.fillEllipse(in: CGRect(x: 612, y: 782, width: 60, height: 47))
-        ctx.fillEllipse(in: CGRect(x: 1112, y: 782, width: 60, height: 47))
+        if walking {
+            // Alternating planted and lifted hands propel the head forward.
+            let swing = 18 * sin(phase)
+            drawArm(ctx, leftArm, pivot: CGPoint(x: 633, y: 808), degrees: -16 + swing)
+            drawArm(ctx, rightArm, pivot: CGPoint(x: 1147, y: 808), degrees: 16 + swing)
+            // Cover each rotating joint with a small patch of matching arm colour.
+            ctx.setFillColor(red: 157 / 255, green: 87 / 255, blue: 47 / 255, alpha: 1)
+            ctx.fillEllipse(in: CGRect(x: 612, y: 782, width: 60, height: 47))
+            ctx.fillEllipse(in: CGRect(x: 1112, y: 782, width: 60, height: 47))
+        } else {
+            // At rest his arms lie flat and level, just as they're drawn.
+            Self.drawUpright(ctx, leftArm, in: CGRect(origin: .zero, size: Self.source))
+            Self.drawUpright(ctx, rightArm, in: CGRect(origin: .zero, size: Self.source))
+        }
         Self.drawUpright(ctx, blankEyes ? blankEyedHead : head, in: CGRect(origin: .zero, size: Self.source))
         guard let image = ctx.makeImage() else { return nil }
         return RenderedFrame(image: image, opaqueBounds: Self.opaqueBounds(ctx, w, h, s))
