@@ -27,6 +27,14 @@ SETTINGS (right-click the tray icon)
   Let me drag Onkey around
                      when ticked, drag him anywhere; click him to hear him.
                      When unticked, clicks pass straight through him.
+  Check for updates  looks for a newer Onkey on GitHub. When there is one,
+                     this says "Update to Onkey x.y": choose it and Onkey
+                     downloads it, replaces the files in this folder, and
+                     restarts with your settings kept.
+  Check for updates automatically
+                     looks once shortly after launch and then every six
+                     hours, and shows a note by the clock when a new version
+                     is out. Untick it to stop.
   Open Onkey when Windows starts
   Exit Onkey
 
@@ -42,5 +50,7 @@ Windows Script Host is used by the VBS launcher. If VBS is disabled, open
 Windows PowerShell in this folder and run:
     powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Start Onkey.ps1"
 
-The app does not use the internet. Onkey is drawn live from Onkey.png, so he
+The only thing Onkey does online is check GitHub for updates (and download
+one when you ask). Untick "Check for updates automatically" to keep him
+offline unless you choose "Check for updates...". Onkey is drawn live from Onkey.png, so he
 stays sharp at every size and on high-DPI screens.

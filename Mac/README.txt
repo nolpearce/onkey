@@ -23,6 +23,15 @@ Click the little Onkey head in the menu bar (top right of the screen) for:
   Let Me Drag Onkey Around
                      when ticked, drag him anywhere; click him to hear him.
                      When unticked, clicks pass straight through him.
+  Check for Updates  looks for a newer Onkey on GitHub. When there is one,
+                     this says "Update to Onkey x.y": choose it and Onkey
+                     downloads it, replaces Onkey.app, and reopens with your
+                     settings kept. Onkey.app needs to be in a folder you can
+                     write to, like Applications. After an update macOS may
+                     ask again whether he can listen to your music.
+  Check for Updates Automatically
+                     looks once shortly after launch and then every six
+                     hours. Untick it to keep Onkey offline.
   Open Onkey at Login
   Quit Onkey
 
@@ -47,6 +56,7 @@ SOURCES
   PetView.swift         draws one Onkey (body, pupils, lids, mouth)
   Renderer.swift        draws his frames from Onkey.png
   Settings.swift        setting names and cached values
+  Updater.swift         finds and installs new releases from GitHub
   BeatTracker.swift     finds the beat in audio
   MusicListener.swift   hears what the Mac is playing
 

@@ -8,6 +8,9 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var pauseItem: NSMenuItem!
     private var loginItem: NSMenuItem!
+    private var updateItem: NSMenuItem!
+    // Finds and installs new releases from GitHub.
+    private let updater = Updater()
     private var optionItems: [NSMenuItem] = []
     private var soundOptionItems: [NSMenuItem] = []
     private var pets: [Pet] = []
@@ -40,7 +43,7 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
             Key.zone: "anywhere", Key.chase: 5, Key.speed: 42.0,
             Key.soundOn: true, Key.soundGap: 90.0, Key.volume: 1.0,
             Key.size: 1.0, Key.opacity: 1.0, Key.layer: "above", Key.draggable: false, Key.watchCursor: true, Key.blink: true,
-            Key.count: 1, Key.dance: false,
+            Key.count: 1, Key.dance: false, Key.checkUpdates: true,
         ])
         prefs = Prefs(defaults)
         let folder = Self.assetFolder()
@@ -68,6 +71,8 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
         matchPetCount()
         buildMenu()
         if prefs.dance { startListening() }
+        updater.onChange = { [weak self] in self?.refreshMenu() }
+        if defaults.bool(forKey: Key.checkUpdates) { updater.startAutomaticChecks() }
 
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
                                                object: nil, queue: .main) { [weak self] _ in self?.screensChanged() }
@@ -161,6 +166,7 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
         statusItem.button?.toolTip = "Onkey"
 
         let menu = NSMenu()
+        menu.autoenablesItems = false   // So the update item can grey out while downloading.
         pauseItem = item("Pause Onkey", #selector(togglePause), "p")
         menu.addItem(pauseItem)
         menu.addItem(option("Dance to Music", Key.dance, true))
@@ -237,6 +243,9 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
 
         menu.addItem(option("Let Me Drag Onkey Around", Key.draggable, true))
         menu.addItem(.separator())
+        updateItem = item("Check for Updates…", #selector(checkForUpdates), "u")
+        menu.addItem(updateItem)
+        menu.addItem(option("Check for Updates Automatically", Key.checkUpdates, true))
         loginItem = item("Open Onkey at Login", #selector(toggleLogin), "")
         menu.addItem(loginItem)
         menu.addItem(item("Quit Onkey", #selector(quit), "q"))
@@ -301,6 +310,8 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
             pets.forEach { $0.rescheduleSound() }
         case Key.soundOn:
             if !defaults.bool(forKey: Key.soundOn) { pets.forEach { $0.stopSound() } }
+        case Key.checkUpdates:
+            if defaults.bool(forKey: Key.checkUpdates) { updater.startAutomaticChecks() } else { updater.stopAutomaticChecks() }
         default:
             break
         }
@@ -314,6 +325,15 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
         }
         let soundOn = defaults.bool(forKey: Key.soundOn) && baseSound != nil
         soundOptionItems.forEach { if $0.action != nil { $0.isEnabled = soundOn } }
+        if updater.downloading, let release = updater.available {
+            updateItem.title = "Downloading Onkey \(release.version)…"
+        } else if let release = updater.available {
+            updateItem.title = "Update to Onkey \(release.version)…"
+        } else {
+            updateItem.title = "Check for Updates…"
+        }
+        updateItem.isEnabled = !updater.downloading
+        statusItem.button?.toolTip = updater.available.map { "Onkey (version \($0.version) is available)" } ?? "Onkey"
         if #available(macOS 13, *) {
             loginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
         } else {
@@ -460,6 +480,8 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
         }
         refreshMenu()
     }
+
+    @objc private func checkForUpdates() { updater.menuChosen() }
 
     @objc private func quit() { listener.stop(); NSApp.terminate(nil) }
 

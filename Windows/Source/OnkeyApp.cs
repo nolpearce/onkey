@@ -39,7 +39,9 @@ namespace OnkeyDesktopPet
         private readonly List<PetForm> pets = new List<PetForm>();
         private readonly List<ToolStripMenuItem> optionItems = new List<ToolStripMenuItem>();
         private readonly List<ToolStripMenuItem> soundOptionItems = new List<ToolStripMenuItem>();
-        private ToolStripMenuItem pauseItem, loginItem;
+        private ToolStripMenuItem pauseItem, loginItem, updateItem;
+        // Finds and installs new releases from GitHub.
+        private readonly Updater updater;
         private float dpi = 1;
         private double lastTick;
         // Hears music and finds its beat while "Dance to music" is on.
@@ -82,6 +84,9 @@ namespace OnkeyDesktopPet
             BuildMenu();
             tray.Visible = true;
             if (Settings.Bool("dance")) StartListening();
+            updater = new Updater(appFolder, tray, Exit);
+            updater.Changed += RefreshMenu;
+            if (Settings.Bool("checkUpdates")) updater.StartAutomaticChecks();
             SystemEvents.DisplaySettingsChanged += OnDisplayChanged;
             lastTick = Wall.Elapsed.TotalSeconds;
             timer.Interval = 33;
@@ -246,6 +251,9 @@ namespace OnkeyDesktopPet
 
             menu.Items.Add(Option("Let me drag Onkey around", "draggable", "true"));
             menu.Items.Add(new ToolStripSeparator());
+            updateItem = Item("Check for updates...", delegate { updater.MenuChosen(); });
+            menu.Items.Add(updateItem);
+            menu.Items.Add(Option("Check for updates automatically", "checkUpdates", "true"));
             loginItem = Item("Open Onkey when Windows starts", delegate { ToggleLogin(); });
             menu.Items.Add(loginItem);
             menu.Items.Add(Item("Exit Onkey", delegate { Exit(); }));
@@ -325,6 +333,9 @@ namespace OnkeyDesktopPet
                 case "soundOn":
                     if (!Settings.Bool("soundOn")) StopSound();
                     break;
+                case "checkUpdates":
+                    if (Settings.Bool("checkUpdates")) updater.StartAutomaticChecks(); else updater.StopAutomaticChecks();
+                    break;
             }
             RefreshMenu();
             foreach (PetForm pet in pets) pet.Present();
@@ -339,6 +350,15 @@ namespace OnkeyDesktopPet
             }
             bool soundOn = Sound != null && Settings.Bool("soundOn");
             foreach (ToolStripMenuItem item in soundOptionItems) item.Enabled = soundOn;
+            if (updater != null)
+            {
+                Updater.Release release = updater.Available;
+                updateItem.Text = release == null ? "Check for updates..."
+                    : updater.Downloading ? "Downloading Onkey " + release.Version + "..."
+                    : "Update to Onkey " + release.Version + "...";
+                updateItem.Enabled = !updater.Downloading;
+                tray.Text = release == null ? "Onkey - right-click for settings" : "Onkey - version " + release.Version + " is available";
+            }
             try
             {
                 using (RegistryKey run = Registry.CurrentUser.OpenSubKey(RunKey))
