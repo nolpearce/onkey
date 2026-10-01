@@ -16,6 +16,9 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
     private var pets: [Pet] = []
     private(set) var frames: [CGImage] = []
     private(set) var idle: CGImage!
+    // The lowest opaque row of each frame (points, y-down, unscaled): where his hands end.
+    private(set) var frameBottoms: [CGFloat] = []
+    private(set) var idleBottom = OnkeyRenderer.canvas.height
     private(set) var petBounds = CGRect(origin: .zero, size: OnkeyRenderer.canvas)  // Points, y-down, unscaled.
     private(set) var pixelScale: CGFloat = 2
     private(set) var baseSound: NSSound?
@@ -134,18 +137,21 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
     private func renderFrames() {
         pixelScale = size * (pets.first?.window.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2)
         var bounds = CGRect.null
-        var rendered: [CGImage] = []
+        var rendered: [CGImage] = [], bottoms: [CGFloat] = []
         for i in 0..<OnkeyRenderer.frameCount {
             let phase = Double(i) / Double(OnkeyRenderer.frameCount) * 2 * .pi
             guard let f = renderer.render(phase: phase, walking: true, pixelsPerPoint: pixelScale,
                                           blankEyes: watching) else { continue }
             rendered.append(f.image)
+            bottoms.append(f.opaqueBounds.maxY)
             bounds = bounds.union(f.opaqueBounds)
         }
         guard let still = renderer.render(phase: 0, walking: false, pixelsPerPoint: pixelScale,
                                           blankEyes: watching) else { return }
         idle = still.image
+        idleBottom = still.opaqueBounds.maxY
         frames = rendered.isEmpty ? [still.image] : rendered
+        frameBottoms = rendered.isEmpty ? [idleBottom] : bottoms
         petBounds = bounds.union(still.opaqueBounds)
     }
 
