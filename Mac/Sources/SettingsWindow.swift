@@ -233,7 +233,11 @@ extension GraphicsContext {
 
 // A shape drawn in a Canvas that fills its frame: fill, then a pencil outline.
 struct SketchBox: View {
-    var radius: CGFloat = 12, seed: Int, fill: Color, line: CGFloat = 1.8, wobble: CGFloat = 1.3
+    var radius: CGFloat = 12
+    let seed: Int
+    let fill: Color
+    var line: CGFloat = 1.8
+    var wobble: CGFloat = 1.3
 
     var body: some View {
         Canvas { ctx, size in
