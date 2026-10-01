@@ -1,4 +1,4 @@
-ONKEY DESKTOP PET - MAC - VERSION 4.4
+ONKEY DESKTOP PET - MAC - VERSION 4.4.1
 
 START
 Open Onkey from your Applications folder (or Launchpad / Spotlight).

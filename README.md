@@ -48,6 +48,9 @@ usually wants the same change in the other.
 
 ## Releasing
 
+Versions always have three parts, `MAJOR.MINOR.PATCH`: write `4.5.0`, never `4.5`, in the
+files below, the tag (`v4.5.0`) and the release title (`Onkey 4.5.0: ...`).
+
 Bump the version in `Mac/build.sh` (`CFBundleShortVersionString`, and `CFBundleVersion`),
 `Windows/Source/Program.cs` (`Version`) and both README.txt files, run `./package.sh`, then
 publish a GitHub release tagged `vX.Y.Z` with `Onkey-Mac.zip` and `Onkey-Windows.zip` attached
