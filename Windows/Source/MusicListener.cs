@@ -19,7 +19,8 @@ namespace OnkeyDesktopPet
         private double sampleRate;
         private float[] mono = new float[0], floats = new float[0];
         private short[] shorts = new short[0];
-        private double lastFed, retryAt;
+        private double lastFed, retryAt, nextSpeakersCheck;
+        private string speakersId;   // Which speakers are being listened to.
         public BeatTracker Tracker;
 
         public BeatTracker.Beat Current { get { return Tracker != null ? Tracker.Current : new BeatTracker.Beat(); } }
@@ -27,12 +28,16 @@ namespace OnkeyDesktopPet
         public void Start(double now)
         {
             Stop();
-            IMMDeviceEnumerator devices = (IMMDeviceEnumerator)new MMDeviceEnumeratorComObject();
-            IMMDevice speakers;
-            Check(devices.GetDefaultAudioEndpoint(Render, Console, out speakers), "Finding the speakers");
+            IMMDevice speakers = DefaultSpeakers();
+            if (speakers == null) throw new InvalidOperationException("No speakers were found.");
             Guid iid = typeof(IAudioClient).GUID;
             object o;
-            Check(speakers.Activate(ref iid, 1 /* CLSCTX_INPROC_SERVER */, IntPtr.Zero, out o), "Opening the speakers");
+            try
+            {
+                speakersId = IdOf(speakers);
+                Check(speakers.Activate(ref iid, 1 /* CLSCTX_INPROC_SERVER */, IntPtr.Zero, out o), "Opening the speakers");
+            }
+            finally { Marshal.ReleaseComObject(speakers); }
             client = (IAudioClient)o;
 
             IntPtr format;
@@ -62,7 +67,9 @@ namespace OnkeyDesktopPet
 
         // Reads everything captured since the last call. Windows sends nothing at all while
         // nothing is playing, so those gaps are fed in as silence (otherwise the last beat
-        // would carry on forever). If the speakers change, it starts again a few seconds later.
+        // would carry on forever). When Windows switches to other speakers (headphones plugged
+        // in, Bluetooth connecting), it moves over to them within a second; if that fails, or
+        // the speakers vanish, it tries again every few seconds.
         public void Poll(double now)
         {
             if (client == null)
@@ -72,6 +79,14 @@ namespace OnkeyDesktopPet
             }
             try
             {
+                if (now >= nextSpeakersCheck)
+                {
+                    nextSpeakersCheck = now + 1;
+                    IMMDevice speakers = DefaultSpeakers();
+                    string id = "";
+                    if (speakers != null) { id = IdOf(speakers); Marshal.ReleaseComObject(speakers); }
+                    if (id != speakersId) { Start(now); return; }
+                }
                 bool got = false;
                 uint packet;
                 Check(capture.GetNextPacketSize(out packet), "Reading audio");
@@ -147,6 +162,24 @@ namespace OnkeyDesktopPet
 
         public void Dispose() { retryAt = 0; Stop(); }
 
+        // Windows' current default speakers, or null if there are none.
+        private static IMMDevice DefaultSpeakers()
+        {
+            IMMDeviceEnumerator devices = (IMMDeviceEnumerator)new MMDeviceEnumeratorComObject();
+            try
+            {
+                IMMDevice speakers;
+                return devices.GetDefaultAudioEndpoint(Render, Console, out speakers) >= 0 ? speakers : null;
+            }
+            finally { Marshal.ReleaseComObject(devices); }
+        }
+
+        private static string IdOf(IMMDevice device)
+        {
+            string id;
+            return device.GetId(out id) >= 0 && id != null ? id : "";
+        }
+
         private static void Check(int hr, string what)
         {
             if (hr < 0) throw new InvalidOperationException(what + " failed (error 0x" + hr.ToString("X8") + ").");
@@ -168,6 +201,8 @@ namespace OnkeyDesktopPet
         private interface IMMDevice
         {
             [PreserveSig] int Activate(ref Guid iid, int clsCtx, IntPtr activationParams, [MarshalAs(UnmanagedType.IUnknown)] out object instance);
+            [PreserveSig] int OpenPropertyStore(int access, out IntPtr properties);
+            [PreserveSig] int GetId([MarshalAs(UnmanagedType.LPWStr)] out string id);
         }
 
         [ComImport, Guid("1CB9AD4C-DBFA-4c32-B178-C2F568A703B2"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
