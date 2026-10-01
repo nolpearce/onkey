@@ -49,7 +49,8 @@ final class SettingsPanel {
         panel.makeKeyAndOrderFront(nil)
         // Clicking anywhere outside Onkey closes it, like a menu.
         clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
-            self?.close()
+            guard let self, !self.panel.frame.contains(NSEvent.mouseLocation) else { return }
+            self.close()
         }
     }
 
@@ -421,7 +422,9 @@ struct JungleBackdrop: View {
                 ctx.leaf(at: CGPoint(x: x + 1, y: len * 0.5), angle: 200 + r.unit() * 30, length: 18, width: 9, color: Jungle.leaf)
             }
         }
-        .allowsHitTesting(false)
+        // Catches clicks on empty parts of the panel, so they don't fall through to the window behind.
+        .contentShape(Rectangle())
+        .onTapGesture {}
     }
 }
 
@@ -485,10 +488,10 @@ struct MovesPage: View {
                       selected: model.string(Key.zone)) { model.set(Key.zone, $0) }
             }
             StackedRow(label: "Walks to my mouse", caption: chaseNames[chase]) {
-                VineSlider("Walks to my mouse", value: Double(chase), range: 0...3, step: 1) { model.set(Key.chase, chaseValues[Int($0.rounded())]) }
+                VineSlider("Walks to my mouse", value: Double(chase), range: 0...3, step: 1, spoken: chaseNames[chase]) { model.set(Key.chase, chaseValues[Int($0.rounded())]) }
             }
             StackedRow(label: "Walking speed", caption: speed < 30 ? "a slow stroll" : speed < 60 ? "normal" : speed < 120 ? "fast" : "zoomies!") {
-                VineSlider("Walking speed", value: speed, range: 10...200) { model.set(Key.speed, $0.rounded()) }
+                VineSlider("Walking speed", value: speed, range: 10...200, spoken: "\(Int(speed))") { model.set(Key.speed, $0.rounded()) }
             }
             SignButton(title: "Bring Onkey to this screen") { model.app.bringHere() }
         }
@@ -506,15 +509,15 @@ struct SoundPage: View {
         let gapIndex = Self.gaps.indices.min { abs(Self.gaps[$0] - gap) < abs(Self.gaps[$1] - gap) } ?? 5
         VStack(alignment: .leading, spacing: 10) {
             InlineRow(label: "Sound", caption: model.app.hasSound ? "his oooo now and then" : "sound clip not installed") {
-                LeafSwitch(isOn: model.binding(Key.soundOn), label: "Sound").disabled(!model.app.hasSound)
+                LeafSwitch(isOn: model.binding(Key.soundOn), label: "Sound on").disabled(!model.app.hasSound)
             }
             StackedRow(label: "How often", caption: Self.every(gap), enabled: on) {
-                VineSlider("How often", value: Double(gapIndex), range: 0...Double(Self.gaps.count - 1), step: 1) {
+                VineSlider("How often", value: Double(gapIndex), range: 0...Double(Self.gaps.count - 1), step: 1, spoken: Self.every(gap)) {
                     model.set(Key.soundGap, Self.gaps[Int($0.rounded())])
                 }.disabled(!on)
             }
             StackedRow(label: "Volume", caption: percent(model.number(Key.volume)), enabled: on) {
-                VineSlider("Volume", value: model.number(Key.volume), range: 0.05...1) { model.set(Key.volume, ($0 * 100).rounded() / 100) }
+                VineSlider("Volume", value: model.number(Key.volume), range: 0.05...1, spoken: percent(model.number(Key.volume))) { model.set(Key.volume, ($0 * 100).rounded() / 100) }
                     .disabled(!on)
             }
             SignButton(title: "Say oooo now") { model.app.playNow() }.disabled(!model.app.hasSound)
@@ -542,10 +545,10 @@ struct LookPage: View {
         VStack(alignment: .leading, spacing: 8) {
             StackedRow(label: "Size", caption: percent(model.number(Key.size))) {
                 // Re-rendering every frame is too slow to follow the mouse, so size waits for the drop.
-                VineSlider("Size", value: model.number(Key.size), range: 0.4...3, onDrop: true) { model.set(Key.size, ($0 * 100).rounded() / 100) }
+                VineSlider("Size", value: model.number(Key.size), range: 0.4...3, onDrop: true, spoken: percent(model.number(Key.size))) { model.set(Key.size, ($0 * 100).rounded() / 100) }
             }
             StackedRow(label: "See-through", caption: opacity > 0.95 ? "solid" : opacity < 0.45 ? "ghostly" : "\(percent(opacity)) solid") {
-                VineSlider("See-through", value: opacity, range: 0.2...1) { model.set(Key.opacity, ($0 * 100).rounded() / 100) }
+                VineSlider("See-through", value: opacity, range: 0.2...1, spoken: percent(opacity)) { model.set(Key.opacity, ($0 * 100).rounded() / 100) }
             }
             StackedRow(label: "Where he lives") {
                 Chips(options: [("In front", "above"), ("On the desktop", "desktop")], selected: model.string(Key.layer)) {
@@ -623,12 +626,14 @@ struct VineSlider: View {
     var step: Double = 0
     var onDrop = false
     var label = ""
+    var spoken: String?   // What VoiceOver reads for the value, like "every 1½-3 min".
     let set: (Double) -> Void
     @State private var dragging: Double?
     @Environment(\.isEnabled) private var enabled
 
-    init(_ label: String, value: Double, range: ClosedRange<Double>, step: Double = 0, onDrop: Bool = false, set: @escaping (Double) -> Void) {
-        self.label = label; self.value = value; self.range = range; self.step = step; self.onDrop = onDrop; self.set = set
+    init(_ label: String, value: Double, range: ClosedRange<Double>, step: Double = 0, onDrop: Bool = false, spoken: String? = nil,
+         set: @escaping (Double) -> Void) {
+        self.label = label; self.spoken = spoken; self.value = value; self.range = range; self.step = step; self.onDrop = onDrop; self.set = set
     }
 
     var body: some View {
@@ -673,8 +678,12 @@ struct VineSlider: View {
         .frame(height: 40)
         .opacity(enabled ? 1 : 0.4)
         .accessibilityRepresentation {
-            Slider(value: Binding(get: { value }, set: { set(step > 0 ? ($0 / step).rounded() * step : $0) }),
-                   in: range, step: step > 0 ? step : (range.upperBound - range.lowerBound) / 20) { Text(label) }
+            let binding = Binding(get: { value }, set: { set(step > 0 ? ($0 / step).rounded() * step : $0) })
+            if step > 0 {
+                Slider(value: binding, in: range, step: step) { Text(label) }.accessibilityValue(spoken ?? "")
+            } else {
+                Slider(value: binding, in: range) { Text(label) }.accessibilityValue(spoken ?? "")
+            }
         }
     }
 
