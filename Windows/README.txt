@@ -4,39 +4,35 @@ START
 1. Exit any older Onkey from its tray icon first.
 2. Keep all the files together in one folder.
 3. Double-click "Start Onkey.vbs".
-4. Right-click Onkey's icon beside the Windows clock and choose Settings.
-   Expand the ^ arrow if the icon is hidden. Double-click it to pause.
+4. Click Onkey's icon beside the Windows clock and a hand-drawn jungle
+   settings panel pops up. Expand the ^ arrow if the icon is hidden.
+   Click anywhere else (or press Escape) to close it.
 
-TRAY MENU (right-click the tray icon)
-  Pause Onkey
-  Dance to music     Onkeys bop (squash down 15%) on the beat of whatever
-                     Windows is playing through the speakers. Nothing is
-                     recorded or sent anywhere.
-  Let me drag Onkey around
-                     when ticked, drag him anywhere; click him to hear him.
-                     When unticked, clicks pass straight through him.
-  Update to Onkey x.y.z
-                     only there when a newer Onkey is out on GitHub.
-  Settings...        everything else, below.
-  Exit Onkey
+SETTINGS PANEL (click the tray icon)
+  Along the top   Pause, Dance (Onkeys bop on the beat of whatever Windows
+                  is playing through the speakers; nothing is recorded or
+                  sent anywhere), and Drag him (drag him anywhere and click
+                  him to hear him; when off, clicks pass straight through)
+  Moves           how many Onkeys (1-20; each wanders and blinks on his
+                  own), where he roams (anywhere, an edge, or stay put), how
+                  often he walks to your mouse, walking speed, and Bring
+                  Onkey to this screen
+  Sound           on/off, how often, volume, and Say oooo now. His mouth
+                  opens while he makes his sound. Windows plays one sound at
+                  a time, so a new "oooo" cuts off the last one.
+  Look            size, how see-through he is, in front of windows or on
+                  the desktop behind them, whether he stays over full-screen
+                  apps (videos, games), eyes that watch your cursor, blinking
+  Updates         Check for updates: when there's a newer Onkey, choose
+                  Update and Onkey downloads it, replaces the files in this
+                  folder, and restarts with your settings kept. Check by
+                  himself: once shortly after launch and then every six
+                  hours, with a note by the clock when a new version is out.
+                  Open at startup: when Windows starts.
+  Exit Onkey      at the bottom of the panel.
 
-SETTINGS WINDOW
-  Behaviour   how many Onkeys (1-20; each wanders and blinks on his own),
-              where he roams (anywhere, an edge, or stay put), how often he
-              walks to your mouse, walking speed, dancing, dragging, and
-              Bring Onkey to this screen
-  Sound       on/off, how often, volume, and Say oooo now. His mouth opens
-              while he makes his sound. Windows plays one sound at a time,
-              so a new "oooo" cuts off the last one.
-  Look        size, how see-through he is, in front of windows or on the
-              desktop behind them, whether he stays over full-screen apps
-              (videos, games), eyes that watch your cursor, and blinking
-  Updates     Check for updates: when there's a newer Onkey, choose Update
-              and Onkey downloads it, replaces the files in this folder, and
-              restarts with your settings kept.
-              Check by himself: once shortly after launch and then every six
-              hours, with a note by the clock when a new version is out.
-              Open at startup: when Windows starts.
+Right-click the icon for a short menu: Pause, Dance to music, Let me drag
+Onkey around, Settings, and Exit.
 
 Settings and his position are saved in %APPDATA%\Onkey\settings.txt.
 "Open at startup" adds an entry under

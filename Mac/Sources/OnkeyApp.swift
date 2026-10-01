@@ -11,7 +11,8 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
     // Finds and installs new releases from GitHub.
     let updater = Updater()
     private var optionItems: [NSMenuItem] = []
-    private var settingsWindow: SettingsWindow?
+    private var menu: NSMenu!
+    private var settingsPanel: SettingsPanel?
     // Called whenever a setting or the update state changes, so an open Settings window can follow.
     var onSettingsChanged: (() -> Void)?
     private var pets: [Pet] = []
@@ -175,8 +176,12 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.image = menuIcon()
         statusItem.button?.toolTip = "Onkey"
+        // A click opens the settings panel; a right-click (or Control-click) opens this short menu.
+        statusItem.button?.target = self
+        statusItem.button?.action = #selector(statusItemClicked)
+        statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
 
-        let menu = NSMenu()
+        menu = NSMenu()
         menu.autoenablesItems = false   // So the update item can grey out while downloading.
         pauseItem = item("Pause Onkey", #selector(togglePause), "p")
         menu.addItem(pauseItem)
@@ -188,7 +193,6 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
         menu.addItem(updateItem)
         menu.addItem(item("Settings…", #selector(showSettings), ","))
         menu.addItem(item("Quit Onkey", #selector(quit), "q"))
-        statusItem.menu = menu
         refreshMenu()
     }
 
@@ -211,9 +215,29 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
         change(key, to: !defaults.bool(forKey: key))
     }
 
+    @objc private func statusItemClicked() {
+        guard let event = NSApp.currentEvent, let button = statusItem.button else { return }
+        if event.type == .rightMouseUp || event.modifierFlags.contains(.control) {
+            settingsPanel?.close()
+            statusItem.menu = menu
+            button.performClick(nil)
+            statusItem.menu = nil
+        } else if settingsPanel?.isShown == true {
+            settingsPanel?.close()
+        } else {
+            showSettings()
+        }
+    }
+
+    // Hangs the settings panel from the menu bar icon.
     @objc func showSettings() {
-        if settingsWindow == nil { settingsWindow = SettingsWindow(app: self) }
-        settingsWindow?.show()
+        guard let button = statusItem.button else { return }
+        if settingsPanel == nil {
+            settingsPanel = SettingsPanel(app: self)
+            settingsPanel?.onClose = { [weak button] in button?.highlight(false) }
+        }
+        settingsPanel?.show(below: button)
+        button.highlight(true)
     }
 
     // Stores a setting and puts it into effect straight away.
@@ -369,10 +393,13 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
 
     // MARK: Actions
 
-    @objc private func togglePause() {
+    var isPaused: Bool { paused }
+
+    @objc func togglePause() {
         paused.toggle()
         pauseItem.title = paused ? "Resume Onkey" : "Pause Onkey"
         if paused { pets.forEach { $0.stopSound(); $0.present(idle) } }
+        onSettingsChanged?()
     }
 
     // Every Onkey says it at once.
@@ -414,7 +441,7 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
 
     @objc func checkForUpdates() { updater.menuChosen() }
 
-    @objc private func quit() { listener.stop(); NSApp.terminate(nil) }
+    @objc func quit() { listener.stop(); NSApp.terminate(nil) }
 
     private func fail(_ message: String) {
         let alert = NSAlert()

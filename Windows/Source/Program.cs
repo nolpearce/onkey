@@ -32,7 +32,7 @@ namespace OnkeyDesktopPet
             {
                 if (!created)
                 {
-                    MessageBox.Show("Onkey is already running. Right-click his icon beside the clock for settings.", "Onkey");
+                    MessageBox.Show("Onkey is already running. Click his icon beside the clock for settings.", "Onkey");
                     return;
                 }
                 Native.SetProcessDPIAware();

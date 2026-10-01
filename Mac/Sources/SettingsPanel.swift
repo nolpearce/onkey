@@ -2,32 +2,63 @@ import AppKit
 import ServiceManagement
 import SwiftUI
 
-// The Settings window: a hand-drawn jungle page with a tab for each group of settings.
-// Everything is drawn here (sketchy lines, vine sliders, leaf switches) rather than taken
-// from stock controls, and every change takes effect straight away. The Windows version
-// in Windows/Source/SettingsForm.cs looks the same.
-final class SettingsWindow: NSObject, NSWindowDelegate {
-    static let size = CGSize(width: 600, height: 610)
-    private let window: NSWindow
+// The settings drop-down: a hand-drawn jungle panel that hangs from the menu bar icon, with
+// quick switches along the top and a tab for each group of settings. Everything is drawn
+// here (sketchy lines, vine sliders, leaf switches) rather than taken from stock controls,
+// and every change takes effect straight away. It closes when you click anywhere else.
+// The Windows version in Windows/Source/SettingsPanel.cs looks the same.
+final class SettingsPanel {
+    static let size = CGSize(width: 380, height: 566)
+    private let panel: Panel
     private let model: SettingsModel
+    private var clickMonitor: Any?
+    var isShown: Bool { panel.isVisible }
+    var onClose: (() -> Void)?
+
+    // A borderless panel that can still take key presses (for Escape).
+    private final class Panel: NSPanel {
+        var onCancel: (() -> Void)?
+        override var canBecomeKey: Bool { true }
+        override func cancelOperation(_ sender: Any?) { onCancel?() }
+    }
 
     init(app: OnkeyApp) {
         model = SettingsModel(app: app)
-        window = NSWindow(contentRect: NSRect(origin: .zero, size: Self.size),
-                          styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
-        super.init()
-        window.title = "Onkey Settings"
-        window.isReleasedWhenClosed = false
-        window.contentView = NSHostingView(rootView: SettingsView(model: model))
-        window.center()
-        window.delegate = self
+        panel = Panel(contentRect: NSRect(origin: .zero, size: Self.size),
+                      styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.level = .popUpMenu
+        panel.isReleasedWhenClosed = false
+        panel.hidesOnDeactivate = false
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+        panel.contentView = NSHostingView(rootView: SettingsView(model: model))
+        panel.onCancel = { [weak self] in self?.close() }
         app.onSettingsChanged = { [weak model] in model?.objectWillChange.send() }
     }
 
-    func show() {
-        // Onkey has no Dock icon, so bring him forward to put the window in front.
-        NSApp.activate(ignoringOtherApps: true)
-        window.makeKeyAndOrderFront(nil)
+    // Shows the panel hanging under the menu bar icon, kept on its screen.
+    func show(below button: NSStatusBarButton) {
+        guard let buttonWindow = button.window else { return }
+        let anchor = buttonWindow.convertToScreen(button.convert(button.bounds, to: nil))
+        let screen = (buttonWindow.screen ?? NSScreen.main ?? NSScreen.screens[0]).visibleFrame
+        let x = max(screen.minX + 8, min(anchor.midX - Self.size.width / 2, screen.maxX - Self.size.width - 8))
+        panel.setFrameOrigin(NSPoint(x: x, y: anchor.minY - Self.size.height - 6))
+        model.objectWillChange.send()
+        panel.makeKeyAndOrderFront(nil)
+        // Clicking anywhere outside Onkey closes it, like a menu.
+        clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            self?.close()
+        }
+    }
+
+    func close() {
+        guard panel.isVisible else { return }
+        panel.orderOut(nil)
+        if let clickMonitor { NSEvent.removeMonitor(clickMonitor) }
+        clickMonitor = nil
+        onClose?()
     }
 }
 
@@ -37,7 +68,7 @@ final class SettingsModel: ObservableObject {
 
     init(app: OnkeyApp) {
         self.app = app
-        head = app.headImage(height: 52)
+        head = app.headImage(height: 40)
     }
 
     func bool(_ key: String) -> Bool { app.defaults.bool(forKey: key) }
@@ -76,12 +107,12 @@ enum Jungle {
         return .system(size: size, weight: bold ? .bold : .regular, design: .rounded)
     }
 
-    static let title = hand(27, bold: true)
-    static let tab = hand(16, bold: true)
-    static let label = hand(16, bold: true)
-    static let chip = hand(14, bold: true)
-    static let small = hand(12.5)
-    static let number = hand(26, bold: true)
+    static let title = hand(22, bold: true)
+    static let tab = hand(13.5, bold: true)
+    static let label = hand(14.5, bold: true)
+    static let chip = hand(12.5, bold: true)
+    static let small = hand(11.5)
+    static let number = hand(22, bold: true)
 }
 
 // A random number generator that gives the same numbers for the same seed, so each
@@ -248,48 +279,71 @@ struct SketchBox: View {
     }
 }
 
-// MARK: Page
+// MARK: Panel
 
 struct SettingsView: View {
     @ObservedObject var model: SettingsModel
     @State private var tab = 0
-    private let tabs = ["Behaviour", "Sound", "Look", "Updates"]
-    private static let cardTop: CGFloat = 104
+    private let tabs = ["Moves", "Sound", "Look", "Updates"]
+    private static let cardTop: CGFloat = 124, footerHeight: CGFloat = 50
 
     var body: some View {
         ZStack(alignment: .topLeading) {
             JungleBackdrop()
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 Image(nsImage: model.head).resizable().interpolation(.high).aspectRatio(contentMode: .fit)
-                    .frame(width: 52, height: 52)
-                Text("Onkey's settings").font(Jungle.title).foregroundColor(Jungle.paper)
+                    .frame(width: 40, height: 40)
+                Text("Onkey").font(Jungle.title).foregroundColor(Jungle.paper)
             }
-            .padding(.leading, 20).padding(.top, 10)
+            .padding(.leading, 14).padding(.top, 8)
+            HStack(spacing: 8) {
+                QuickToggle(title: "Pause", isOn: model.app.isPaused) { model.app.togglePause() }
+                QuickToggle(title: "Dance", isOn: model.bool(Key.dance)) { model.set(Key.dance, !model.bool(Key.dance)) }
+                QuickToggle(title: "Drag him", isOn: model.bool(Key.draggable)) { model.set(Key.draggable, !model.bool(Key.draggable)) }
+            }
+            .offset(x: 18, y: 56)
             ForEach(tabs.indices, id: \.self) { i in
                 if i != tab { tabButton(i) }
             }
             card
             tabButton(tab)
-            page.padding(.top, Self.cardTop + 26).padding(.leading, 46).padding(.trailing, 46)
+            page.padding(.top, Self.cardTop + 18).padding(.horizontal, 30)
+            footer
         }
-        .frame(width: SettingsWindow.size.width, height: SettingsWindow.size.height, alignment: .topLeading)
+        .frame(width: SettingsPanel.size.width, height: SettingsPanel.size.height, alignment: .topLeading)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Jungle.ink, lineWidth: 2))
     }
 
     private var card: some View {
         Canvas { ctx, size in
-            let r = CGRect(x: 18, y: Self.cardTop, width: size.width - 36, height: size.height - Self.cardTop - 18)
+            let r = CGRect(x: 12, y: Self.cardTop, width: size.width - 24, height: size.height - Self.cardTop - 12)
             ctx.fill(Sketch.box(r.offsetBy(dx: 4, dy: 6), radius: 14, seed: 11, wobble: 1.5), with: .color(.black.opacity(0.35)))
             let path = Sketch.box(r, radius: 14, seed: 11, wobble: 1.5)
             ctx.fill(path, with: .color(Jungle.paper))
             ctx.pencil(path, Jungle.ink, 2.2)
+            let ruleY = size.height - 12 - Self.footerHeight
+            ctx.stroke(Sketch.line(CGPoint(x: 30, y: ruleY), CGPoint(x: size.width - 30, y: ruleY), seed: 4, wobble: 1.2),
+                       with: .color(Jungle.ink.opacity(0.35)), lineWidth: 1.2)
         }
         .allowsHitTesting(false)
     }
 
+    private var footer: some View {
+        HStack {
+            SignButton(title: "Quit Onkey", small: true) { model.app.quit() }
+            Spacer()
+            Text("v\(Updater.current)").font(Jungle.small).foregroundColor(Jungle.faded)
+        }
+        .padding(.horizontal, 30)
+        .frame(width: SettingsPanel.size.width, height: Self.footerHeight)
+        .offset(y: SettingsPanel.size.height - 12 - Self.footerHeight)
+    }
+
     private func tabButton(_ i: Int) -> some View {
         let selected = i == tab
-        let width: CGFloat = 112, height: CGFloat = selected ? 44 : 38
-        let x = 18 + 14 + CGFloat(i) * (width + 8)
+        let width: CGFloat = 78, height: CGFloat = selected ? 36 : 31
+        let x = 12 + 10 + CGFloat(i) * (width + 6)
         return ZStack {
             Canvas { ctx, size in
                 let path = Sketch.tab(CGRect(origin: .zero, size: size).insetBy(dx: 1.5, dy: 0), seed: Int(x) * 7 + (selected ? 1 : 0))
@@ -298,7 +352,7 @@ struct SettingsView: View {
                     // Wood grain.
                     for g in 1..<3 {
                         let y = CGFloat(g) * size.height / 3
-                        ctx.stroke(Sketch.line(CGPoint(x: 10, y: y), CGPoint(x: size.width - 10, y: y + 2), seed: Int(x) + g, wobble: 1.2),
+                        ctx.stroke(Sketch.line(CGPoint(x: 8, y: y), CGPoint(x: size.width - 8, y: y + 2), seed: Int(x) + g, wobble: 1.2),
                                    with: .color(Jungle.ink.opacity(0.27)), lineWidth: 1)
                     }
                 }
@@ -319,7 +373,7 @@ struct SettingsView: View {
 
     @ViewBuilder private var page: some View {
         switch tab {
-        case 0: BehaviourPage(model: model)
+        case 0: MovesPage(model: model)
         case 1: SoundPage(model: model)
         case 2: LookPage(model: model)
         default: UpdatesPage(model: model)
@@ -368,27 +422,46 @@ struct JungleBackdrop: View {
 
 // MARK: Pages
 
-// One setting: its name (and a note about it) on the left, its control on the right.
-struct Row<Control: View>: View {
+// A setting with its name (and a note about it) on the left and a small control on the right.
+struct InlineRow<Control: View>: View {
     let label: String
     var caption: String? = nil
     var enabled = true
     @ViewBuilder let control: Control
 
     var body: some View {
-        HStack(alignment: .center, spacing: 0) {
+        HStack(alignment: .center, spacing: 8) {
             VStack(alignment: .leading, spacing: 0) {
                 Text(label).font(Jungle.label).foregroundColor(enabled ? Jungle.ink : Jungle.faded)
                 if let caption { Text(caption).font(Jungle.small).foregroundColor(Jungle.faded) }
             }
-            .frame(width: 216, alignment: .leading)
-            control.frame(maxWidth: .infinity, alignment: .leading)
+            Spacer(minLength: 0)
+            control
         }
-        .frame(minHeight: caption == nil ? 30 : 46)
+        .frame(minHeight: 40)
     }
 }
 
-struct BehaviourPage: View {
+// A setting with its name and note on one line and its control across the card below.
+struct StackedRow<Control: View>: View {
+    let label: String
+    var caption: String? = nil
+    var enabled = true
+    @ViewBuilder let control: Control
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(label).font(Jungle.label).foregroundColor(enabled ? Jungle.ink : Jungle.faded)
+                Spacer(minLength: 0)
+                if let caption { Text(caption).font(Jungle.small).foregroundColor(Jungle.faded) }
+            }
+            control
+        }
+    }
+}
+
+struct MovesPage: View {
     @ObservedObject var model: SettingsModel
     // "chase" is how many trips out of N head for the mouse (0 for never).
     private let chaseValues = [0, 5, 2, 1], chaseNames = ["never", "sometimes", "often", "always"]
@@ -397,23 +470,21 @@ struct BehaviourPage: View {
         let count = model.app.defaults.integer(forKey: Key.count)
         let chase = max(0, chaseValues.firstIndex(of: model.app.defaults.integer(forKey: Key.chase)) ?? 0)
         let speed = model.number(Key.speed)
-        VStack(alignment: .leading, spacing: 8) {
-            Row(label: "How many Onkeys", caption: count <= 1 ? "just the one" : count >= 8 ? "total chaos" : "a little troop") {
+        VStack(alignment: .leading, spacing: 10) {
+            InlineRow(label: "How many Onkeys", caption: count <= 1 ? "just the one" : count >= 8 ? "total chaos" : "a little troop") {
                 CoconutStepper(value: count, range: 1...20) { model.set(Key.count, $0) }
             }
-            Row(label: "Where he roams") {
+            StackedRow(label: "Where he roams") {
                 Chips(options: [("Anywhere", "anywhere"), ("Bottom", "bottom"), ("Top", "top"),
                                 ("Left side", "left"), ("Right side", "right"), ("Stay put", "stay")],
                       selected: model.string(Key.zone)) { model.set(Key.zone, $0) }
             }
-            Row(label: "Walks to my mouse", caption: chaseNames[chase]) {
+            StackedRow(label: "Walks to my mouse", caption: chaseNames[chase]) {
                 VineSlider(value: Double(chase), range: 0...3, step: 1) { model.set(Key.chase, chaseValues[Int($0.rounded())]) }
             }
-            Row(label: "Walking speed", caption: speed < 30 ? "a slow stroll" : speed < 60 ? "normal" : speed < 120 ? "fast" : "zoomies!") {
+            StackedRow(label: "Walking speed", caption: speed < 30 ? "a slow stroll" : speed < 60 ? "normal" : speed < 120 ? "fast" : "zoomies!") {
                 VineSlider(value: speed, range: 10...200) { model.set(Key.speed, $0.rounded()) }
             }
-            Row(label: "Dance to music", caption: "bops to the beat") { LeafSwitch(isOn: model.binding(Key.dance)) }
-            Row(label: "Let me drag him", caption: "click him to hear him") { LeafSwitch(isOn: model.binding(Key.draggable)) }
             SignButton(title: "Bring Onkey to this screen") { model.app.bringHere() }
         }
     }
@@ -428,16 +499,16 @@ struct SoundPage: View {
         let on = model.app.hasSound && model.bool(Key.soundOn)
         let gap = model.number(Key.soundGap)
         let gapIndex = Self.gaps.indices.min { abs(Self.gaps[$0] - gap) < abs(Self.gaps[$1] - gap) } ?? 5
-        VStack(alignment: .leading, spacing: 8) {
-            Row(label: "Sound", caption: model.app.hasSound ? "his oooo now and then" : "sound clip not installed") {
+        VStack(alignment: .leading, spacing: 10) {
+            InlineRow(label: "Sound", caption: model.app.hasSound ? "his oooo now and then" : "sound clip not installed") {
                 LeafSwitch(isOn: model.binding(Key.soundOn)).disabled(!model.app.hasSound)
             }
-            Row(label: "How often", caption: Self.every(gap), enabled: on) {
+            StackedRow(label: "How often", caption: Self.every(gap), enabled: on) {
                 VineSlider(value: Double(gapIndex), range: 0...Double(Self.gaps.count - 1), step: 1) {
                     model.set(Key.soundGap, Self.gaps[Int($0.rounded())])
                 }.disabled(!on)
             }
-            Row(label: "Volume", caption: percent(model.number(Key.volume)), enabled: on) {
+            StackedRow(label: "Volume", caption: percent(model.number(Key.volume)), enabled: on) {
                 VineSlider(value: model.number(Key.volume), range: 0.05...1) { model.set(Key.volume, ($0 * 100).rounded() / 100) }
                     .disabled(!on)
             }
@@ -446,8 +517,8 @@ struct SoundPage: View {
     }
 
     private static func every(_ gap: Double) -> String {
-        if gap * 2 < 120 { return "every \(Int(gap))-\(Int(gap * 2)) seconds" }
-        return "every \(minutes(gap))-\(minutes(gap * 2)) minutes"
+        if gap * 2 < 120 { return "every \(Int(gap))-\(Int(gap * 2)) sec" }
+        return "every \(minutes(gap))-\(minutes(gap * 2)) min"
     }
 
     private static func minutes(_ seconds: Double) -> String {
@@ -464,23 +535,23 @@ struct LookPage: View {
         let opacity = model.number(Key.opacity)
         let desktop = model.string(Key.layer) == "desktop"
         VStack(alignment: .leading, spacing: 8) {
-            Row(label: "Size", caption: percent(model.number(Key.size))) {
+            StackedRow(label: "Size", caption: percent(model.number(Key.size))) {
                 // Re-rendering every frame is too slow to follow the mouse, so size waits for the drop.
                 VineSlider(value: model.number(Key.size), range: 0.4...3, onDrop: true) { model.set(Key.size, ($0 * 100).rounded() / 100) }
             }
-            Row(label: "See-through", caption: opacity > 0.95 ? "solid" : opacity < 0.45 ? "ghostly" : "\(percent(opacity)) solid") {
+            StackedRow(label: "See-through", caption: opacity > 0.95 ? "solid" : opacity < 0.45 ? "ghostly" : "\(percent(opacity)) solid") {
                 VineSlider(value: opacity, range: 0.2...1) { model.set(Key.opacity, ($0 * 100).rounded() / 100) }
             }
-            Row(label: "Where he lives") {
+            StackedRow(label: "Where he lives") {
                 Chips(options: [("In front", "above"), ("On the desktop", "desktop")], selected: model.string(Key.layer)) {
                     model.set(Key.layer, $0)
                 }
             }
-            Row(label: "Over full-screen apps", caption: "videos, games, slideshows", enabled: !desktop) {
+            InlineRow(label: "Over full-screen apps", caption: "videos, games, slideshows", enabled: !desktop) {
                 LeafSwitch(isOn: model.binding(Key.overFullScreen)).disabled(desktop)
             }
-            Row(label: "Watch my cursor", caption: "his eyes follow the mouse") { LeafSwitch(isOn: model.binding(Key.watchCursor)) }
-            Row(label: "Blink", caption: "now and then") { LeafSwitch(isOn: model.binding(Key.blink)) }
+            InlineRow(label: "Watch my cursor", caption: "his eyes follow the mouse") { LeafSwitch(isOn: model.binding(Key.watchCursor)) }
+            InlineRow(label: "Blink", caption: "now and then") { LeafSwitch(isOn: model.binding(Key.blink)) }
         }
     }
 }
@@ -490,22 +561,21 @@ struct UpdatesPage: View {
 
     var body: some View {
         let updater = model.app.updater
-        let current = Updater.current
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             Group {
                 if let release = updater.available {
-                    Text(updater.downloading ? "Downloading Onkey \(release.version)…" : "Onkey \(release.version) is out! You have \(current).")
+                    Text(updater.downloading ? "Downloading Onkey \(release.version)…" : "Onkey \(release.version) is out!")
                 } else {
-                    Text("You have Onkey \(current).")
+                    Text("You have Onkey \(Updater.current).")
                 }
             }
-            .font(Jungle.label).foregroundColor(Jungle.ink).frame(minHeight: 30)
+            .font(Jungle.label).foregroundColor(Jungle.ink)
             SignButton(title: updater.available.map { "Update to Onkey \($0.version)" } ?? "Check for updates") {
                 model.app.checkForUpdates()
             }
             .disabled(updater.downloading)
-            Row(label: "Check by himself", caption: "looks every few hours") { LeafSwitch(isOn: model.binding(Key.checkUpdates)) }
-            Row(label: "Open at login", caption: "when you log in to your Mac") {
+            InlineRow(label: "Check by himself", caption: "looks every few hours") { LeafSwitch(isOn: model.binding(Key.checkUpdates)) }
+            InlineRow(label: "Open at login", caption: "when you log in to your Mac") {
                 LeafSwitch(isOn: Binding(get: { model.app.opensAtLogin }, set: { _ in model.app.toggleLogin() }))
             }
         }
@@ -522,28 +592,24 @@ struct LeafSwitch: View {
     @Environment(\.isEnabled) private var enabled
 
     var body: some View {
-        HStack(spacing: 8) {
-            Canvas { ctx, size in
-                let pod = CGRect(origin: .zero, size: size).insetBy(dx: 1.5, dy: 1.5)
-                let path = Sketch.box(pod, radius: pod.height / 2, seed: 5, wobble: 1.1)
-                ctx.fill(path, with: .color(isOn ? Jungle.leaf : Jungle.pod))
-                ctx.pencil(path, Jungle.ink, 2)
-                let knobX = isOn ? pod.maxX - pod.height / 2 - 1 : pod.minX + pod.height / 2 + 1
-                let knob = Sketch.circle(CGPoint(x: knobX, y: pod.midY), pod.height / 2 - 4, seed: 8, wobble: 0.8)
-                ctx.fill(knob, with: .color(isOn ? Jungle.banana : Jungle.paper))
-                ctx.pencil(knob, Jungle.ink, 1.8)
-                if isOn { ctx.leaf(at: CGPoint(x: knobX - 5, y: pod.midY + 2), angle: -40, length: 13, width: 6, color: Jungle.leafDark) }
-            }
-            .frame(width: 62, height: 30)
-            Text(isOn ? "on" : "off").font(Jungle.small).foregroundColor(Jungle.faded)
+        Canvas { ctx, size in
+            let pod = CGRect(origin: .zero, size: size).insetBy(dx: 1.5, dy: 1.5)
+            let path = Sketch.box(pod, radius: pod.height / 2, seed: 5, wobble: 1.1)
+            ctx.fill(path, with: .color(isOn ? Jungle.leaf : Jungle.pod))
+            ctx.pencil(path, Jungle.ink, 2)
+            let knobX = isOn ? pod.maxX - pod.height / 2 - 1 : pod.minX + pod.height / 2 + 1
+            let knob = Sketch.circle(CGPoint(x: knobX, y: pod.midY), pod.height / 2 - 4, seed: 8, wobble: 0.8)
+            ctx.fill(knob, with: .color(isOn ? Jungle.banana : Jungle.paper))
+            ctx.pencil(knob, Jungle.ink, 1.8)
+            if isOn { ctx.leaf(at: CGPoint(x: knobX - 5, y: pod.midY + 2), angle: -40, length: 13, width: 6, color: Jungle.leafDark) }
         }
+        .frame(width: 58, height: 28)
         .opacity(enabled ? 1 : 0.4)
         .contentShape(Rectangle())
         .onTapGesture { if enabled { isOn.toggle() } }
     }
 }
 
-// A slider drawn as a vine with a leaf to drag along it.
 struct VineSlider: View {
     let value: Double
     let range: ClosedRange<Double>
@@ -658,7 +724,8 @@ struct Flow: Layout {
     }
 }
 
-// A number with coconut buttons either side to take one away or add one, and a banana per Onkey.
+
+// A number with coconut buttons either side to take one away or add one.
 struct CoconutStepper: View {
     let value: Int
     let range: ClosedRange<Int>
@@ -667,21 +734,8 @@ struct CoconutStepper: View {
     var body: some View {
         HStack(spacing: 0) {
             coconut(plus: false)
-            Text("\(value)").font(Jungle.number).foregroundColor(Jungle.ink).frame(width: 58)
+            Text("\(value)").font(Jungle.number).foregroundColor(Jungle.ink).frame(width: 40)
             coconut(plus: true)
-            Canvas { ctx, _ in
-                for i in 0..<min(value, 10) {
-                    let at = CGPoint(x: 4 + CGFloat(i % 5) * 20, y: 4 + CGFloat(i / 5) * 18)
-                    var b = Path()
-                    b.move(to: at)
-                    b.addCurve(to: CGPoint(x: at.x + 16, y: at.y + 4), control1: CGPoint(x: at.x + 4, y: at.y + 12), control2: CGPoint(x: at.x + 12, y: at.y + 12))
-                    b.addCurve(to: at, control1: CGPoint(x: at.x + 11, y: at.y + 8), control2: CGPoint(x: at.x + 5, y: at.y + 7))
-                    ctx.fill(b, with: .color(Jungle.banana))
-                    ctx.stroke(b, with: .color(Jungle.ink), lineWidth: 1.3)
-                }
-            }
-            .frame(width: 110, height: 40)
-            .padding(.leading, 12)
         }
     }
 
@@ -689,15 +743,15 @@ struct CoconutStepper: View {
         let enabled = plus ? value < range.upperBound : value > range.lowerBound
         return Canvas { ctx, size in
             let c = CGPoint(x: size.width / 2, y: size.height / 2)
-            let shell = Sketch.circle(c, 17, seed: plus ? 2 : 1, wobble: 1)
+            let shell = Sketch.circle(c, 15, seed: plus ? 2 : 1, wobble: 1)
             ctx.fill(shell, with: .color(Jungle.bark))
             ctx.pencil(shell, Jungle.ink, 2)
             var sign = Path()
-            sign.move(to: CGPoint(x: c.x - 7, y: c.y)); sign.addLine(to: CGPoint(x: c.x + 7, y: c.y + 0.6))
-            if plus { sign.move(to: CGPoint(x: c.x + 0.4, y: c.y - 7)); sign.addLine(to: CGPoint(x: c.x, y: c.y + 7)) }
-            ctx.stroke(sign, with: .color(Jungle.paper), style: StrokeStyle(lineWidth: 3.2, lineCap: .round))
+            sign.move(to: CGPoint(x: c.x - 6, y: c.y)); sign.addLine(to: CGPoint(x: c.x + 6, y: c.y + 0.6))
+            if plus { sign.move(to: CGPoint(x: c.x + 0.4, y: c.y - 6)); sign.addLine(to: CGPoint(x: c.x, y: c.y + 6)) }
+            ctx.stroke(sign, with: .color(Jungle.paper), style: StrokeStyle(lineWidth: 3, lineCap: .round))
         }
-        .frame(width: 40, height: 40)
+        .frame(width: 36, height: 36)
         .opacity(enabled ? 1 : 0.35)
         .contentShape(Circle())
         .onTapGesture { if enabled { set(value + (plus ? 1 : -1)) } }
@@ -707,13 +761,18 @@ struct CoconutStepper: View {
 // A banana-yellow sign to click.
 struct SignButton: View {
     let title: String
+    var small = false
     let action: () -> Void
     @Environment(\.isEnabled) private var enabled
     @State private var down = false
 
+    init(title: String, small: Bool = false, action: @escaping () -> Void) {
+        self.title = title; self.small = small; self.action = action
+    }
+
     var body: some View {
-        Text(title).font(Jungle.label).foregroundColor(Jungle.ink)
-            .padding(.horizontal, 18).frame(height: 40)
+        Text(title).font(small ? Jungle.chip : Jungle.label).foregroundColor(Jungle.ink)
+            .padding(.horizontal, small ? 11 : 18).frame(height: small ? 30 : 38)
             .background(SketchBox(radius: 8, seed: title.count * 13, fill: Jungle.banana, line: 2.2, wobble: 1.4))
             .offset(x: down ? 1 : 0, y: down ? 2 : 0)
             .opacity(enabled ? 1 : 0.4)
@@ -724,5 +783,28 @@ struct SignButton: View {
                     if down { action() }
                     down = false
                 })
+    }
+}
+
+// A quick on/off switch along the top of the panel, like a pebble that turns green.
+struct QuickToggle: View {
+    let title: String
+    let isOn: Bool
+    let flip: () -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Canvas { ctx, size in
+                let dot = Sketch.circle(CGPoint(x: size.width / 2, y: size.height / 2), 4.5, seed: title.count, wobble: 0.5)
+                ctx.fill(dot, with: .color(isOn ? Jungle.banana : Jungle.pod))
+                ctx.stroke(dot, with: .color(Jungle.ink), lineWidth: 1.2)
+            }
+            .frame(width: 11, height: 11)
+            Text(title).font(Jungle.chip).foregroundColor(isOn ? Jungle.paper : Jungle.ink)
+        }
+        .padding(.leading, 8).padding(.trailing, 11).frame(height: 28)
+        .background(SketchBox(radius: 13, seed: title.count * 29, fill: isOn ? Jungle.leaf : Jungle.paper, line: isOn ? 2.2 : 1.6, wobble: 1.2))
+        .contentShape(Rectangle())
+        .onTapGesture(perform: flip)
     }
 }
