@@ -22,7 +22,7 @@ namespace OnkeyDesktopPet
     public static class Program
     {
         // Compared with the latest GitHub release to find updates; keep it in step with README.txt.
-        public const string Version = "4.4.2";
+        public const string Version = "4.4.3";
 
         [STAThread]
         public static void Main()
