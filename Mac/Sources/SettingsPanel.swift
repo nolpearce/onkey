@@ -371,6 +371,7 @@ struct SettingsView: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(tabs[i])
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityValue(selected ? "selected" : "")
         .accessibilityAction { tab = i }
         .offset(x: x, y: Self.cardTop - height + (selected ? 4 : 0))
     }
@@ -484,10 +485,10 @@ struct MovesPage: View {
                       selected: model.string(Key.zone)) { model.set(Key.zone, $0) }
             }
             StackedRow(label: "Walks to my mouse", caption: chaseNames[chase]) {
-                VineSlider(value: Double(chase), range: 0...3, step: 1) { model.set(Key.chase, chaseValues[Int($0.rounded())]) }
+                VineSlider("Walks to my mouse", value: Double(chase), range: 0...3, step: 1) { model.set(Key.chase, chaseValues[Int($0.rounded())]) }
             }
             StackedRow(label: "Walking speed", caption: speed < 30 ? "a slow stroll" : speed < 60 ? "normal" : speed < 120 ? "fast" : "zoomies!") {
-                VineSlider(value: speed, range: 10...200) { model.set(Key.speed, $0.rounded()) }
+                VineSlider("Walking speed", value: speed, range: 10...200) { model.set(Key.speed, $0.rounded()) }
             }
             SignButton(title: "Bring Onkey to this screen") { model.app.bringHere() }
         }
@@ -505,15 +506,15 @@ struct SoundPage: View {
         let gapIndex = Self.gaps.indices.min { abs(Self.gaps[$0] - gap) < abs(Self.gaps[$1] - gap) } ?? 5
         VStack(alignment: .leading, spacing: 10) {
             InlineRow(label: "Sound", caption: model.app.hasSound ? "his oooo now and then" : "sound clip not installed") {
-                LeafSwitch(isOn: model.binding(Key.soundOn)).disabled(!model.app.hasSound)
+                LeafSwitch(isOn: model.binding(Key.soundOn), label: "Sound").disabled(!model.app.hasSound)
             }
             StackedRow(label: "How often", caption: Self.every(gap), enabled: on) {
-                VineSlider(value: Double(gapIndex), range: 0...Double(Self.gaps.count - 1), step: 1) {
+                VineSlider("How often", value: Double(gapIndex), range: 0...Double(Self.gaps.count - 1), step: 1) {
                     model.set(Key.soundGap, Self.gaps[Int($0.rounded())])
                 }.disabled(!on)
             }
             StackedRow(label: "Volume", caption: percent(model.number(Key.volume)), enabled: on) {
-                VineSlider(value: model.number(Key.volume), range: 0.05...1) { model.set(Key.volume, ($0 * 100).rounded() / 100) }
+                VineSlider("Volume", value: model.number(Key.volume), range: 0.05...1) { model.set(Key.volume, ($0 * 100).rounded() / 100) }
                     .disabled(!on)
             }
             SignButton(title: "Say oooo now") { model.app.playNow() }.disabled(!model.app.hasSound)
@@ -541,10 +542,10 @@ struct LookPage: View {
         VStack(alignment: .leading, spacing: 8) {
             StackedRow(label: "Size", caption: percent(model.number(Key.size))) {
                 // Re-rendering every frame is too slow to follow the mouse, so size waits for the drop.
-                VineSlider(value: model.number(Key.size), range: 0.4...3, onDrop: true) { model.set(Key.size, ($0 * 100).rounded() / 100) }
+                VineSlider("Size", value: model.number(Key.size), range: 0.4...3, onDrop: true) { model.set(Key.size, ($0 * 100).rounded() / 100) }
             }
             StackedRow(label: "See-through", caption: opacity > 0.95 ? "solid" : opacity < 0.45 ? "ghostly" : "\(percent(opacity)) solid") {
-                VineSlider(value: opacity, range: 0.2...1) { model.set(Key.opacity, ($0 * 100).rounded() / 100) }
+                VineSlider("See-through", value: opacity, range: 0.2...1) { model.set(Key.opacity, ($0 * 100).rounded() / 100) }
             }
             StackedRow(label: "Where he lives") {
                 Chips(options: [("In front", "above"), ("On the desktop", "desktop")], selected: model.string(Key.layer)) {
@@ -552,10 +553,10 @@ struct LookPage: View {
                 }
             }
             InlineRow(label: "Over full-screen apps", caption: "videos, games, slideshows", enabled: !desktop) {
-                LeafSwitch(isOn: model.binding(Key.overFullScreen)).disabled(desktop)
+                LeafSwitch(isOn: model.binding(Key.overFullScreen), label: "Over full-screen apps").disabled(desktop)
             }
-            InlineRow(label: "Watch my cursor", caption: "his eyes follow the mouse") { LeafSwitch(isOn: model.binding(Key.watchCursor)) }
-            InlineRow(label: "Blink", caption: "now and then") { LeafSwitch(isOn: model.binding(Key.blink)) }
+            InlineRow(label: "Watch my cursor", caption: "his eyes follow the mouse") { LeafSwitch(isOn: model.binding(Key.watchCursor), label: "Watch my cursor") }
+            InlineRow(label: "Blink", caption: "now and then") { LeafSwitch(isOn: model.binding(Key.blink), label: "Blink") }
         }
     }
 }
@@ -578,9 +579,9 @@ struct UpdatesPage: View {
                 model.app.checkForUpdates()
             }
             .disabled(updater.downloading)
-            InlineRow(label: "Check by himself", caption: "looks every few hours") { LeafSwitch(isOn: model.binding(Key.checkUpdates)) }
+            InlineRow(label: "Check by himself", caption: "looks every few hours") { LeafSwitch(isOn: model.binding(Key.checkUpdates), label: "Check by himself") }
             InlineRow(label: "Open at login", caption: "when you log in to your Mac") {
-                LeafSwitch(isOn: Binding(get: { model.app.opensAtLogin }, set: { _ in model.app.toggleLogin() }))
+                LeafSwitch(isOn: Binding(get: { model.app.opensAtLogin }, set: { _ in model.app.toggleLogin() }), label: "Open at login")
             }
         }
     }
@@ -593,6 +594,7 @@ private func percent(_ v: Double) -> String { "\(Int((v * 100).rounded()))%" }
 // An on/off switch: a sketched pod with a knob that slides across and turns green.
 struct LeafSwitch: View {
     @Binding var isOn: Bool
+    var label = ""
     @Environment(\.isEnabled) private var enabled
 
     var body: some View {
@@ -611,10 +613,7 @@ struct LeafSwitch: View {
         .opacity(enabled ? 1 : 0.4)
         .contentShape(Rectangle())
         .onTapGesture { if enabled { isOn.toggle() } }
-        .accessibilityElement(children: .ignore)
-        .accessibilityAddTraits(.isButton)
-        .accessibilityValue(isOn ? "on" : "off")
-        .accessibilityAction { if enabled { isOn.toggle() } }
+        .accessibilityRepresentation { Toggle(label, isOn: $isOn) }
     }
 }
 
@@ -623,12 +622,13 @@ struct VineSlider: View {
     let range: ClosedRange<Double>
     var step: Double = 0
     var onDrop = false
+    var label = ""
     let set: (Double) -> Void
     @State private var dragging: Double?
     @Environment(\.isEnabled) private var enabled
 
-    init(value: Double, range: ClosedRange<Double>, step: Double = 0, onDrop: Bool = false, set: @escaping (Double) -> Void) {
-        self.value = value; self.range = range; self.step = step; self.onDrop = onDrop; self.set = set
+    init(_ label: String, value: Double, range: ClosedRange<Double>, step: Double = 0, onDrop: Bool = false, set: @escaping (Double) -> Void) {
+        self.label = label; self.value = value; self.range = range; self.step = step; self.onDrop = onDrop; self.set = set
     }
 
     var body: some View {
@@ -672,13 +672,9 @@ struct VineSlider: View {
         }
         .frame(height: 40)
         .opacity(enabled ? 1 : 0.4)
-        .accessibilityElement(children: .ignore)
-        .accessibilityValue("\(Int(((value - range.lowerBound) / (range.upperBound - range.lowerBound) * 100).rounded()))%")
-        .accessibilityAdjustableAction { direction in
-            guard enabled else { return }
-            let nudge = step > 0 ? step : (range.upperBound - range.lowerBound) / 20
-            let next = direction == .increment ? value + nudge : value - nudge
-            set(min(range.upperBound, max(range.lowerBound, next)))
+        .accessibilityRepresentation {
+            Slider(value: Binding(get: { value }, set: { set(step > 0 ? ($0 / step).rounded() * step : $0) }),
+                   in: range, step: step > 0 ? step : (range.upperBound - range.lowerBound) / 20) { Text(label) }
         }
     }
 
@@ -709,6 +705,7 @@ struct Chips: View {
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(options[i].name)
                     .accessibilityAddTraits(chosen ? [.isButton, .isSelected] : .isButton)
+                    .accessibilityValue(chosen ? "selected" : "")
                     .accessibilityAction { choose(options[i].value) }
             }
         }
