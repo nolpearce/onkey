@@ -3,9 +3,9 @@ import Foundation
 // Finds the beat in whatever audio it's fed. Every 10 ms it measures how much the sound
 // suddenly got louder (spectral flux) in four frequency bands: kick drums, bass and low
 // percussion, snares/bells/guitar, and hi-hats/shakers. Each band's hits are checked for how
-// regularly they repeat, and the steadiest bands get the most say in the tempo, so a song
-// driven by a cowbell is followed as well as one driven by a kick. Where the beat lands also
-// leans on bass thumps, since kick drums mark the beat while hi-hats often sit on the
+// regularly they repeat over a bar, and the steadiest bands get the most say in the tempo, so
+// a song driven by a cowbell is followed as well as one driven by a kick. Where the beat lands
+// also leans on bass thumps, since kick drums mark the beat while hi-hats often sit on the
 // off-beat. Mirrors BeatTracker.cs on Windows.
 final class BeatTracker {
     struct Beat {
@@ -16,9 +16,13 @@ final class BeatTracker {
     }
 
     private static let hopsPerSecond = 100.0
-    private static let historyHops = 600          // 6 seconds of onsets.
+    private static let historyHops = 800          // 8 seconds of onsets.
     private static let minLag = 30, maxLag = 100  // 200 down to 60 beats per minute.
+    private static let multiples = 4              // A tempo is checked over this many beats (a bar).
+    // How loud the music has been lately is remembered as a peak that slowly falls away.
+    private static let levelFall = 0.9985         // Per hop: halves in about 4.6 seconds.
     private static let bandEdges = [0.0, 150, 600, 3000]   // Hz where each band starts.
+    private static let blur = [1, 0.7, 0.25]               // Onset smoothing, by hops away.
 
     private let sampleRate: Double
     private let hop: Int
@@ -28,11 +32,11 @@ final class BeatTracker {
     private var previous: [Double]
     private var bandOf: [Int]                     // Which band each FFT bin belongs to.
     private var bandOnsets: [[Double]]
-    private var fullSum = 0.0, count = 0
+    private var fullSum = 0.0, level = 1e-6, count = 0
     // Low-pass filter (around 150 Hz) for the bass thumps.
     private let b0, b1, b2, a1, a2: Double
     private var x1 = 0.0, x2 = 0.0, y1 = 0.0, y2 = 0.0
-    private var bassSum = 0.0, lastBassLog = 0.0
+    private var bassSum = 0.0, lastBassLog = 0.0, bassLevel = 1e-10
     private var bassOnsets = [Double](repeating: 0, count: historyHops)
     private var loudness = [Double](repeating: 0, count: historyHops)
     private var write = 0, hopsSeen = 0
@@ -85,16 +89,28 @@ final class BeatTracker {
     }
 
     private func finishHop(at time: Double) {
-        // Log-compressed spectrum of the latest slice; the flux is how much it rose since the last.
+        // Log-compressed spectrum of the latest slice, measured against how loud the music has
+        // been lately so every song is compressed alike however loud it is (against full scale,
+        // held chords that slowly wobble were often taken for a beat); the flux is how much it
+        // rose since the last.
         let magnitudes = fft.magnitudes(of: ring, startingAt: ringWrite)
+        var average = 0.0
+        for k in 1..<magnitudes.count { average += magnitudes[k] }
+        average /= Double(magnitudes.count - 1)
+        level = max(1e-6, average, level * Self.levelFall)
+        let gain = 1 / level
         var flux = [Double](repeating: 0, count: Self.bandEdges.count)
         for k in 1..<magnitudes.count {
-            let m = log(1 + 100 * magnitudes[k])
+            let m = log(1 + gain * magnitudes[k])
             flux[bandOf[k]] += max(0, m - previous[k])
             previous[k] = m
         }
         for b in 0..<flux.count { bandOnsets[b][write] = flux[b] }
-        let bassLog = log(bassSum / Double(hop) + 1e-10)
+        // Bass thumps, also against how loud the bass has been lately, so a soft pickup note
+        // after a gap doesn't count as much as the downbeat.
+        let bassPower = bassSum / Double(hop)
+        bassLevel = max(1e-10, bassPower, bassLevel * Self.levelFall)
+        let bassLog = log(1 + 30 * bassPower / bassLevel)
         bassOnsets[write] = max(0, bassLog - lastBassLog)
         lastBassLog = bassLog
         loudness[write] = fullSum / Double(hop)
@@ -105,12 +121,13 @@ final class BeatTracker {
     }
 
     // Onsets oldest first, keeping only what stands above the local average (so a loud
-    // stretch doesn't count as one long hit), then with the overall average removed.
+    // stretch doesn't count as one long hit), blurred over a few hops (so a drummer a little
+    // early or late still lines up with the beat before), then with the overall average removed.
     private func history(_ source: [Double]) -> [Double] {
         let n = min(hopsSeen, Self.historyHops)
         var raw = [Double](repeating: 0, count: n)
         for i in 0..<n { raw[i] = source[(write - n + i + Self.historyHops) % Self.historyHops] }
-        var out = [Double](repeating: 0, count: n)
+        var peaks = [Double](repeating: 0, count: n)
         var windowSum = 0.0
         let half = 12
         for i in 0..<min(n, half) { windowSum += raw[i] }
@@ -118,10 +135,26 @@ final class BeatTracker {
             if i + half < n { windowSum += raw[i + half] }
             if i - half - 1 >= 0 { windowSum -= raw[i - half - 1] }
             let width = min(n - 1, i + half) - max(0, i - half) + 1
-            out[i] = max(0, raw[i] - windowSum / Double(width))
+            peaks[i] = max(0, raw[i] - windowSum / Double(width))
+        }
+        var out = [Double](repeating: 0, count: n)
+        for i in 0..<n {
+            var s = 0.0, w = 0.0
+            for j in (1 - Self.blur.count)..<Self.blur.count where i + j >= 0 && i + j < n {
+                let k = Self.blur[abs(j)]
+                s += peaks[i + j] * k; w += k
+            }
+            out[i] = s / w
         }
         let mean = out.reduce(0, +) / Double(max(1, n))
         return out.map { $0 - mean }
+    }
+
+    // How much a lag (in hops) is favoured as the beat: most around 120 beats per minute, so a
+    // beat isn't mistaken for half or double itself.
+    private static func prior(_ lag: Int) -> Double {
+        let octaves = log2(Double(lag) / 50)
+        return exp(-0.5 * octaves * octaves / 0.8)
     }
 
     private func analyse(now: Double) {
@@ -130,22 +163,38 @@ final class BeatTracker {
         for i in 1...100 { recentLoudness += loudness[(write - i + Self.historyHops) % Self.historyHops] }
         let rms = (recentLoudness / 100).squareRoot()
 
-        // Each band's self-similarity at every lag. A band's say in the tempo grows with how
+        // Each band's self-similarity half a beat and one, two, three and four beats later,
+        // averaged. Checking a whole bar matters for syncopated grooves (clave, dembow, tumbao),
+        // where little repeats exactly one beat later but everything repeats a bar later;
+        // checking only one beat let a part that repeats every dotted beat win, giving two-thirds
+        // or four-thirds of the tempo. The half beat favours the real beat over a dotted one,
+        // since nearly every groove has eighth notes. A band's say in the tempo grows with how
         // regular it is (the square of its best match), so steady instruments lead.
         let bands = bandOnsets.map { history($0) }
         let n = bands[0].count
+        let longest = min(Self.multiples * (Self.maxLag + 1), n / 2)
         var scores = [Double](repeating: 0, count: Self.maxLag + 2)
         var weights = [Double](repeating: 0, count: bands.count)
+        var similarity = [Double](repeating: 0, count: longest + 1)
         for (b, o) in bands.enumerated() {
             var r0 = 0.0
             for v in o { r0 += v * v }
             guard r0 > 0 else { continue }
+            r0 /= Double(n)
+            // Averaged per overlapping pair, so long lags (slow songs) aren't marked down for
+            // overlapping less.
+            for lag in ((Self.minLag - 1) / 2)...longest {
+                var r = 0.0
+                for i in lag..<n { r += o[i] * o[i - lag] }
+                similarity[lag] = r / Double(n - lag) / r0
+            }
             var own = [Double](repeating: 0, count: Self.maxLag + 2)
             var peak = 0.0
             for lag in (Self.minLag - 1)...(Self.maxLag + 1) {
-                var r = 0.0
-                for i in lag..<n { r += o[i] * o[i - lag] }
-                own[lag] = r / r0
+                var sum = similarity[(lag + 1) / 2], used = 1
+                var k = 1
+                while k <= Self.multiples && k * lag <= longest { sum += similarity[k * lag]; used += 1; k += 1 }
+                own[lag] = sum / Double(used)
                 if lag >= Self.minLag && lag <= Self.maxLag { peak = max(peak, own[lag]) }
             }
             weights[b] = peak * peak
@@ -154,18 +203,16 @@ final class BeatTracker {
         let totalWeight = weights.reduce(0, +)
         guard totalWeight > 0 else { active = false; publish(Beat(active: false, lastBeat: beat.lastBeat, period: beat.period)); return }
         for lag in 0..<scores.count { scores[lag] /= totalWeight }
-        // Tempo: the lag with the strongest self-similarity, nudged toward ~120 BPM so a beat
-        // isn't mistaken for half or double itself.
+        // Tempo: the lag with the strongest self-similarity, nudged toward ~120 BPM.
         var bestLag = Self.minLag, bestScore = -Double.infinity
         for lag in Self.minLag...Self.maxLag {
-            let octaves = log2(Double(lag) / 50)
-            let weighted = scores[lag] * exp(-0.5 * octaves * octaves / 0.8)
+            let weighted = scores[lag] * Self.prior(lag)
             if weighted > bestScore { bestScore = weighted; bestLag = lag }
         }
-        // Confidence: how closely the onsets match themselves one beat later. Real music
-        // measured 0.25-0.7, clean beats up to 0.9, and beatless noise mostly under 0.2. It
-        // takes 0.38 to start dancing but only dropping under 0.2 to stop, so quieter
-        // passages don't interrupt a song.
+        // Confidence: how closely the onsets match themselves over the next bar. Test grooves
+        // (pop, house, salsa, bossa nova, reggaeton, cumbia, quiet ballads) measured 0.35-0.65,
+        // and noise or notes played at random under 0.1. It takes 0.38 to start dancing but only
+        // dropping under 0.2 to stop, so quieter passages don't interrupt a song.
         let confidence = scores[bestLag]
         // Parabolic fit between neighbouring lags for a fractional period.
         let l = scores[bestLag - 1], c = scores[bestLag], r = scores[bestLag + 1]
