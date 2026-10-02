@@ -7,6 +7,7 @@ using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Globalization;
 using System.IO;
+using System.IO.Compression;
 using System.Media;
 using System.Net;
 using System.Runtime.InteropServices;
@@ -21,8 +22,9 @@ namespace OnkeyDesktopPet
 {
     // Checks GitHub Releases for a newer Onkey and installs it in place: downloads
     // Onkey-Windows.zip, checks it against the SHA-256 GitHub lists for it, unzips it, then
-    // exits and lets a small PowerShell script copy the new files over this folder and start
-    // Onkey again. Mac/Sources/Updater.swift does the same for the Mac version.
+    // exits and lets the new Onkey.exe (run with --install, see Installer below) copy itself
+    // over this folder and start again. Mac/Sources/Updater.swift does the same for the Mac
+    // version.
     internal sealed class Updater
     {
         private const string LatestUrl = "https://api.github.com/repos/nolpearce/onkey/releases/latest";
@@ -145,9 +147,9 @@ namespace OnkeyDesktopPet
 
         private void Install(Release release)
         {
-            // In a copy of the repo the assets live in ..\Assets rather than beside the
-            // launcher; that copy is updated with git, not with release downloads.
-            if (!Directory.Exists(Path.Combine(appFolder, "Assets")) || !File.Exists(Path.Combine(appFolder, "Start Onkey.vbs")))
+            // In a copy of the repo the assets live in ..\Assets rather than beside
+            // Onkey.exe; that copy is updated with git, not with release downloads.
+            if (!OnkeyApp.IsReleaseFolder(appFolder))
             {
                 MessageBox.Show("This Onkey runs from a copy of the code, so update it with \"git pull\" instead.", "Onkey");
                 return;
@@ -195,41 +197,22 @@ namespace OnkeyDesktopPet
             }
 
             string expanded = Path.Combine(scratch, "files");
-            RunPowerShell("Expand-Archive -LiteralPath " + Quote(zip) + " -DestinationPath " + Quote(expanded) + " -Force");
+            try { ZipFile.ExtractToDirectory(zip, expanded); }
+            catch (InvalidDataException) { throw new Exception("the download wasn't a zip Onkey could open. Try again later."); }
             string files = Path.Combine(expanded, "Onkey-Windows");
-            if (!File.Exists(Path.Combine(files, "Start Onkey.vbs")) || Directory.GetFiles(Path.Combine(files, "Source"), "*.cs").Length == 0)
+            if (!File.Exists(Path.Combine(files, "Onkey.exe")) || !OnkeyApp.IsReleaseFolder(files))
                 throw new Exception("the download didn't contain Onkey's files.");
             return files;
         }
 
-        // Exits, and once Onkey has fully exited copies the new files over this folder and
-        // starts him again. Source files the new version no longer has are removed, since
-        // the launcher compiles every .cs file it finds. If copying fails, the old Onkey
-        // starts again and says so.
+        // Starts the new Onkey.exe in install mode and exits; it waits for this Onkey to
+        // close, copies the new files over this folder and starts Onkey again.
         private void Relaunch(string files)
         {
-            string script = Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(files)), "install.ps1");
-            File.WriteAllText(script, string.Join("\r\n", new string[] {
-                "param([int]$OnkeyPid, [string]$From, [string]$To)",
-                "$ErrorActionPreference = 'Stop'",
-                "try { Wait-Process -Id $OnkeyPid -Timeout 30 } catch { }",
-                "try {",
-                "    $keep = @(Get-ChildItem -LiteralPath (Join-Path $From 'Source') -Filter '*.cs' | ForEach-Object { $_.Name })",
-                "    Copy-Item -Path (Join-Path $From '*') -Destination $To -Recurse -Force",
-                "    Get-ChildItem -LiteralPath (Join-Path $To 'Source') -Filter '*.cs' | Where-Object { $keep -notcontains $_.Name } | Remove-Item -Force",
-                "} catch {",
-                "    Add-Type -AssemblyName System.Windows.Forms",
-                "    [System.Windows.Forms.MessageBox]::Show(\"Onkey couldn't finish updating: \" + $_.Exception.Message, 'Onkey') | Out-Null",
-                "}",
-                "Start-Process -FilePath 'wscript.exe' -ArgumentList ('\"' + (Join-Path $To 'Start Onkey.vbs') + '\"')",
-                "Remove-Item -LiteralPath (Split-Path (Split-Path $From -Parent) -Parent) -Recurse -Force -ErrorAction SilentlyContinue",
-            }), Encoding.UTF8);
-
-            ProcessStartInfo start = new ProcessStartInfo("powershell.exe",
-                "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File " + Arg(script) +
-                " -OnkeyPid " + Process.GetCurrentProcess().Id + " -From " + Arg(files) + " -To " + Arg(appFolder));
+            ProcessStartInfo start = new ProcessStartInfo(Path.Combine(files, "Onkey.exe"),
+                "--install " + Process.GetCurrentProcess().Id + " " + Arg(files) + " " + Arg(appFolder));
             start.UseShellExecute = false;
-            start.CreateNoWindow = true;
+            start.WorkingDirectory = files;
             try { Process.Start(start); }
             catch (Exception ex)
             {
@@ -301,24 +284,6 @@ namespace OnkeyDesktopPet
             catch { return false; }
         }
 
-        private static void RunPowerShell(string command)
-        {
-            ProcessStartInfo start = new ProcessStartInfo("powershell.exe",
-                "-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"$ErrorActionPreference = 'Stop'; " + command + "\"");
-            start.UseShellExecute = false;
-            start.CreateNoWindow = true;
-            start.RedirectStandardError = true;
-            using (Process p = Process.Start(start))
-            {
-                string errors = p.StandardError.ReadToEnd();
-                p.WaitForExit();
-                if (p.ExitCode != 0) throw new Exception("unzipping failed. " + errors.Trim());
-            }
-        }
-
-        // A PowerShell single-quoted string.
-        private static string Quote(string s) { return "'" + s.Replace("'", "''") + "'"; }
-
         // A command-line argument in double quotes. Folder paths can't contain quotes; a
         // trailing backslash would escape the closing quote, so it's dropped.
         private static string Arg(string s) { return "\"" + s.TrimEnd('\\') + "\""; }
@@ -326,6 +291,61 @@ namespace OnkeyDesktopPet
         private static void Open(string url)
         {
             try { Process.Start(url); } catch { /* No browser; nothing more to do. */ }
+        }
+    }
+
+    // What the new Onkey.exe does when the updater starts it with --install: waits for the
+    // old Onkey to exit, copies the new files over its folder, and starts Onkey again. Old
+    // source files the new version no longer has are removed. If copying fails, whatever
+    // Onkey is in the folder starts again and says so. The download folder in %TEMP% is
+    // cleared by the next Onkey that starts, since this one is running from it.
+    internal static class Installer
+    {
+        public static void Run(string pid, string from, string to)
+        {
+            int id;
+            if (int.TryParse(pid, out id))
+            {
+                try { using (Process old = Process.GetProcessById(id)) old.WaitForExit(30000); }
+                catch (ArgumentException) { /* Already gone. */ }
+            }
+            string error = null;
+            // Antivirus scanners and Explorer can hold a file for a moment, so try a few times.
+            for (int attempt = 0; attempt < 10; attempt++)
+            {
+                try { CopyFolder(from, to); error = null; break; }
+                catch (Exception ex) { error = ex.Message; Thread.Sleep(500); }
+            }
+            if (error == null)
+            {
+                try { RemoveStale(Path.Combine(from, "Source"), Path.Combine(to, "Source"), "*.cs"); }
+                catch { /* Leftover source files do no harm. */ }
+            }
+            else MessageBox.Show("Onkey couldn't finish updating: " + error, "Onkey");
+            try
+            {
+                ProcessStartInfo start = new ProcessStartInfo(Path.Combine(to, "Onkey.exe"));
+                start.UseShellExecute = false;
+                start.WorkingDirectory = to;
+                Process.Start(start);
+            }
+            catch (Exception ex) { MessageBox.Show("Onkey couldn't start again: " + ex.Message, "Onkey"); }
+        }
+
+        private static void CopyFolder(string from, string to)
+        {
+            Directory.CreateDirectory(to);
+            foreach (string file in Directory.GetFiles(from))
+                File.Copy(file, Path.Combine(to, Path.GetFileName(file)), true);
+            foreach (string folder in Directory.GetDirectories(from))
+                CopyFolder(folder, Path.Combine(to, Path.GetFileName(folder)));
+        }
+
+        private static void RemoveStale(string from, string to, string pattern)
+        {
+            if (!Directory.Exists(to)) return;
+            foreach (string file in Directory.GetFiles(to, pattern))
+                if (!File.Exists(Path.Combine(from, Path.GetFileName(file)))) File.Delete(file);
         }
     }
 }

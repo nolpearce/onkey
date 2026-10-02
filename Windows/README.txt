@@ -3,7 +3,9 @@ ONKEY DESKTOP PET - VERSION 4.4.3 - WINDOWS
 START
 1. Exit any older Onkey from its tray icon first.
 2. Keep all the files together in one folder.
-3. Double-click "Start Onkey.vbs".
+3. Double-click "Onkey.exe". The first time, Windows may say it protected
+   your PC because Onkey isn't from a known publisher: click "More info",
+   then "Run anyway".
 4. Click Onkey's icon beside the Windows clock and a hand-drawn jungle
    settings panel pops up. Expand the ^ arrow if the icon is hidden.
    Click anywhere else (or press Escape) to close it.
@@ -40,11 +42,9 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run; turn it off to
 remove it again. If you move the Onkey folder, turn it off and on again.
 
 WINDOWS REQUIREMENTS
-Windows PowerShell and .NET Framework, included in standard Windows 10/11.
-The files in Source\ are compiled in memory on launch; no install is needed.
-Windows Script Host is used by the VBS launcher. If VBS is disabled, open
-Windows PowerShell in this folder and run:
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Start Onkey.ps1"
+Windows 10 or 11 (Onkey.exe uses the .NET Framework that comes with them).
+Nothing needs installing. The Source folder holds the code Onkey.exe is
+built from; it isn't needed to run him.
 
 The only thing Onkey does online is check GitHub for updates (and download
 one when you ask). Untick "Check for updates automatically" to keep him

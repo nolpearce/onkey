@@ -63,9 +63,12 @@ namespace OnkeyDesktopPet
 
         public OnkeyApp()
         {
-            // Set by Start Onkey.ps1: where the launcher lives, and where Onkey.png and Sounds are.
-            appFolder = Environment.GetEnvironmentVariable("ONKEY_APP_DIR") ?? AppDomain.CurrentDomain.BaseDirectory;
-            assetFolder = Environment.GetEnvironmentVariable("ONKEY_ASSET_DIR") ?? appFolder;
+            // Onkey.png and Sounds sit in Assets beside Onkey.exe in a release download, or in
+            // ..\Assets when Onkey.exe is built in the repo's Windows folder.
+            appFolder = AppDomain.CurrentDomain.BaseDirectory;
+            assetFolder = Path.Combine(appFolder, "Assets");
+            if (!Directory.Exists(assetFolder)) assetFolder = Path.Combine(Path.GetDirectoryName(appFolder.TrimEnd('\\')), "Assets");
+            if (IsReleaseFolder(appFolder)) TidyOldInstall();
             Renderer = new OnkeyRenderer(Path.Combine(assetFolder, "Onkey.png"));
             string soundPath = Path.Combine(assetFolder, Path.Combine("Sounds", "oooo.wav"));
             if (File.Exists(soundPath)) { try { Sound = new OnkeySound(soundPath); } catch { Sound = null; } }
@@ -444,6 +447,42 @@ namespace OnkeyDesktopPet
             }
         }
 
+        // A folder unzipped from Onkey-Windows.zip, which the updater may replace (a copy of
+        // the repo is updated with git instead).
+        public static bool IsReleaseFolder(string folder)
+        {
+            return File.Exists(Path.Combine(folder, Path.Combine("Assets", "Onkey.png")));
+        }
+
+        // Versions up to 4.4.3 started from Start Onkey.vbs, which compiled Source\*.cs with
+        // PowerShell. Once an update brings Onkey.exe, drop the PowerShell launcher, point
+        // "Open at startup" for this folder at Onkey.exe, and clear old update downloads.
+        private void TidyOldInstall()
+        {
+            try { File.Delete(Path.Combine(appFolder, "Start Onkey.ps1")); } catch { }
+            try
+            {
+                using (RegistryKey run = Registry.CurrentUser.OpenSubKey(RunKey, true))
+                {
+                    string value = run == null ? null : run.GetValue("Onkey") as string;
+                    if (value != null && value != LoginCommand &&
+                        value.IndexOf(appFolder.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase) >= 0)
+                        run.SetValue("Onkey", LoginCommand);
+                }
+            }
+            catch { }
+            try
+            {
+                foreach (string folder in Directory.GetDirectories(Path.GetTempPath(), "Onkey-update-*"))
+                {
+                    try { Directory.Delete(folder, true); } catch { /* Still in use; next time. */ }
+                }
+            }
+            catch { }
+        }
+
+        private static string LoginCommand { get { return "\"" + Application.ExecutablePath + "\""; } }
+
         public void ToggleLogin()
         {
             try
@@ -451,7 +490,7 @@ namespace OnkeyDesktopPet
                 using (RegistryKey run = Registry.CurrentUser.CreateSubKey(RunKey))
                 {
                     if (run.GetValue("Onkey") != null) run.DeleteValue("Onkey");
-                    else run.SetValue("Onkey", "wscript.exe \"" + Path.Combine(appFolder, "Start Onkey.vbs") + "\"");
+                    else run.SetValue("Onkey", LoginCommand);
                 }
             }
             catch (Exception ex)
