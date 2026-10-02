@@ -9,7 +9,10 @@ it would be fun to have him wandering around my desktop, so I made this.
 
 ## Mac
 
-Needs the Xcode Command Line Tools (`xcode-select --install`).
+Download `Onkey-Mac.dmg` from [Releases](https://github.com/nolpearce/onkey/releases), open it and drag Onkey into the Applications folder in the window that appears. It runs on Apple Silicon and Intel Macs with macOS 13 or later.
+The first time you open him, macOS will say it can't check the app: click **Done**, then go to **System Settings → Privacy & Security** and click **Open Anyway**.
+
+To build it yourself instead, install the Xcode Command Line Tools (`xcode-select --install`) and run:
 
 ```bash
 ./Mac/build.sh
@@ -24,22 +27,21 @@ This builds `Onkey.app`, installs it in `/Applications` and launches it. Click t
 
 Dancing bops every Onkey (squashes him down 15%) on the beat of whatever's playing. Right-click the head for a short menu.
 
-Or download `Onkey-Mac.zip` from [Releases](https://github.com/nolpearce/onkey/releases), unzip it and drag `Onkey.app` into Applications. It runs on Apple Silicon and Intel Macs with macOS 13 or later.
-The first time, macOS will say it can't check the app: click **Done**, then go to **System Settings → Privacy & Security** and click **Open Anyway**.
 More detail is in [Mac/README.txt](Mac/README.txt).
 
 ## Windows
 
-Download `Onkey-Windows.zip` from [Releases](https://github.com/nolpearce/onkey/releases), extract it and double-click `Onkey.exe`. The first time, Windows may say it protected your PC because Onkey isn't from a known publisher: click **More info**, then **Run anyway**. Then click Onkey's icon beside the clock for the same settings panel as the Mac version. To run it from this repo instead, run `Windows\build.cmd` and start `Windows\Onkey.exe`. See [Windows/README.txt](Windows/README.txt).
+Download `Onkey-Windows-Setup.exe` from [Releases](https://github.com/nolpearce/onkey/releases) and open it. Windows may say it protected your PC because Onkey isn't from a known publisher: click **More info**, then **Run anyway**. The installer needs no administrator password; it adds Onkey to the Start menu (and the desktop, if you like), and you can remove him again from **Settings → Apps**. Then click Onkey's icon beside the clock for the same settings panel as the Mac version. To run it from this repo instead, run `Windows\build.cmd` and start `Windows\Onkey.exe`. See [Windows/README.txt](Windows/README.txt).
 
 ## Layout
 
 ```
 Assets/      Onkey.png (the sprite both versions draw from), Sounds/, Preview.gif
-Mac/         Sources/*.swift, build.sh (builds and installs Onkey.app), README.txt
-Windows/     Source/*.cs, build.cmd (builds Onkey.exe), Onkey.ico, README.txt
-package.sh   builds the Mac release download into dist/
-.github/     windows-release.yml builds and attaches the Windows download
+Assets/Installer/  the jungle pictures for the DMG window and the Windows installer (make-art.py)
+Mac/         Sources/*.swift, build.sh (builds and installs Onkey.app), make-dmg.sh, README.txt
+Windows/     Source/*.cs, build.cmd (builds Onkey.exe), installer.iss, Onkey.ico, README.txt
+package.sh   builds the Mac release downloads into dist/
+.github/     windows-release.yml builds and attaches the Windows downloads
 ```
 
 The two versions mirror each other file for file where they can (for example
@@ -53,7 +55,9 @@ files below, the tag (`v4.5.0`) and the release title (`Onkey 4.5.0: ...`).
 
 Bump the version in `Mac/build.sh` (`CFBundleShortVersionString`, and `CFBundleVersion`),
 `Windows/Source/Program.cs` (`Version`) and both README.txt files, run `./package.sh`, then
-publish a GitHub release tagged `vX.Y.Z` with `Onkey-Mac.zip` attached. Publishing it starts
-the Windows release workflow, which builds `Onkey.exe` and attaches `Onkey-Windows.zip`; both
-names must stay exactly as they are. Running Onkeys compare their version with the latest release's tag
+publish a GitHub release tagged `vX.Y.Z` with `Onkey-Mac.dmg` and `Onkey-Mac.zip` attached.
+Publishing it starts the Windows release workflow, which builds `Onkey.exe` and attaches
+`Onkey-Windows-Setup.exe` and `Onkey-Windows.zip`. The DMG and the setup are what people
+download; the zips are what the in-app updater downloads, so their names must stay exactly
+as they are. Running Onkeys compare their version with the latest release's tag
 and offer the update from the menu.
