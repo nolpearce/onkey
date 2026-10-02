@@ -194,6 +194,15 @@ namespace OnkeyDesktopPet
             quit.Small = true;
             quit.Bounds = new RectangleF(LabelLeft, FooterTop + 12, 0, 30);
             always.Add(quit);
+            // Puts a crash report (or any problem) into a GitHub issue to check and send. After
+            // a crash it says so, with a berry on it.
+            SketchButton report = new SketchButton("", delegate { CrashReport.Send(); });
+            report.Text = delegate { return CrashReport.Pending ? "Send crash report" : "Report a problem"; };
+            report.Flag = delegate { return CrashReport.Pending; };
+            report.Form = this;
+            report.Small = true;
+            report.Bounds = new RectangleF(quit.HitArea().Right + 8, FooterTop + 12, 0, 30);
+            always.Add(report);
 
             Page moves = AddPage("Moves");
             Stepper count = new Stepper(1, 20, delegate { return (int)app.Settings.Number("count"); },
@@ -1064,6 +1073,8 @@ namespace OnkeyDesktopPet
         private bool down;
 
         public bool Small;
+        // When true, a berry sits on its corner to catch the eye.
+        public Func<bool> Flag;
 
         public SketchButton(string text, Action click) { Text = delegate { return text; }; this.click = click; }
 
@@ -1092,6 +1103,12 @@ namespace OnkeyDesktopPet
             }
             SizeF size = g.MeasureString(Text(), Font);
             Jungle.Text(g, Text(), Font, Dim(Jungle.Ink, enabled), new PointF(r.Left + (r.Width - size.Width) / 2, r.Top + (r.Height - size.Height) / 2));
+            if (Flag != null && Flag())
+                using (GraphicsPath dot = Sketch.Circle(new PointF(r.Right - 3, r.Top + 2), 5f, 7, 0.5f))
+                {
+                    using (Brush b = new SolidBrush(Color.FromArgb(214, 84, 52))) g.FillPath(b, dot);
+                    using (Pen ink = new Pen(Jungle.Ink, 1.2f)) g.DrawPath(ink, dot);
+                }
         }
 
         public override void Down(PointF p) { down = true; }

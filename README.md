@@ -27,6 +27,8 @@ This builds `Onkey.app`, installs it in `/Applications` and launches it. Click t
 
 Dancing bops every Onkey (squashes him down 15%) on the beat of whatever's playing. Right-click the head for a short menu.
 
+If Onkey crashes, **Send crash report** at the bottom of the panel opens a new issue here with his version, what went wrong and the end of his log, for you to check before sending. He keeps that log in `~/Library/Logs/Onkey` on a Mac and `%APPDATA%\Onkey` on Windows.
+
 More detail is in [Mac/README.txt](Mac/README.txt).
 
 ## Windows

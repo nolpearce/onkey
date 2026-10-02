@@ -59,6 +59,7 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
         renderer = r
         let soundURL = folder.appendingPathComponent("Sounds/oooo.wav")
         baseSound = NSSound(contentsOf: soundURL, byReference: false)
+        if baseSound == nil { Log.warn("Couldn't load his sound from \(soundURL.path)") }
         soundEnvelope = Self.loudness(of: soundURL)
         renderFrames()
 
@@ -87,9 +88,15 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
         t.tolerance = 1.0 / 120   // Lets macOS line the ticks up with other work to save power.
         RunLoop.main.add(t, forMode: .common)
         timer = t
+        Log.info("Onkey is up: \(pets.count) on screen, \(NSScreen.screens.count) screen(s)")
+        if CrashReport.pending { Log.info("A crash report is waiting to be sent") }
     }
 
-    func applicationWillTerminate(_ notification: Notification) { savePosition() }
+    func applicationWillTerminate(_ notification: Notification) {
+        savePosition()
+        Log.info("Onkey exited")
+        Log.flush()
+    }
 
     private static func assetFolder() -> URL {
         if let env = ProcessInfo.processInfo.environment["ONKEY_ASSET_DIR"] {
@@ -192,6 +199,7 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
         updateItem = item("Update Onkey…", #selector(checkForUpdates), "u")
         menu.addItem(updateItem)
         menu.addItem(item("Settings…", #selector(showSettings), ","))
+        menu.addItem(item("Report a Problem…", #selector(reportProblem), ""))
         menu.addItem(item("Quit Onkey", #selector(quit), "q"))
         refreshMenu()
     }
@@ -347,6 +355,7 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
         do {
             try listener.start()
         } catch {
+            Log.error("Starting to listen to music", error)
             listener.stop()
             defaults.set(false, forKey: Key.dance)
             prefs = Prefs(defaults)
@@ -360,6 +369,7 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
     }
 
     private func screensChanged() {
+        Log.info("Screens changed: \(NSScreen.screens.count) now")
         for pet in pets {
             pet.area = (pet.window.screen ?? Self.screenUnderMouse()).visibleFrame
             pet.clampToArea()
@@ -432,6 +442,7 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
                 try SMAppService.mainApp.register()
             }
         } catch {
+            Log.error("Changing the login setting", error)
             let alert = NSAlert()
             alert.messageText = "Couldn't change the login setting"
             alert.informativeText = "\(error.localizedDescription)\n\nYou can add Onkey yourself in System Settings > General > Login Items."
@@ -449,7 +460,14 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
 
     @objc func quit() { listener.stop(); NSApp.terminate(nil) }
 
+    // Puts a crash report (or any problem) into a GitHub issue to check and send.
+    @objc func reportProblem() {
+        CrashReport.send()
+        onSettingsChanged?()
+    }
+
     private func fail(_ message: String) {
+        Log.crash("Onkey couldn't start", details: message)
         let alert = NSAlert()
         alert.messageText = "Onkey could not start"
         alert.informativeText = message

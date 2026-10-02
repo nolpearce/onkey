@@ -31,7 +31,18 @@ namespace OnkeyDesktopPet
                 "size=1", "opacity=1", "layer=above", "overFullScreen=false", "draggable=false", "watchCursor=true", "blink=true", "count=1", "dance=false", "checkUpdates=true" };
             foreach (string line in defaults) Parse(line);
             try { if (File.Exists(path)) foreach (string line in File.ReadAllLines(path)) Parse(line); }
-            catch { /* Unreadable settings just mean the defaults. */ }
+            catch (Exception ex) { Log.Error("Reading settings", ex); /* Unreadable settings just mean the defaults. */ }
+            // A damaged or hand-edited file mustn't make him zero pixels big or a thousand strong.
+            Limit("size", 0.4, 3, 1); Limit("opacity", 0.2, 1, 1); Limit("speed", 10, 200, 42);
+            Limit("volume", 0.05, 1, 1); Limit("soundGap", 10, 600, 90); Limit("count", 1, 20, 1); Limit("chase", 0, 5, 5);
+        }
+
+        private void Limit(string key, double min, double max, double fallback)
+        {
+            double v;
+            if (!double.TryParse(Get(key), NumberStyles.Float, CultureInfo.InvariantCulture, out v) || double.IsNaN(v)) v = fallback;
+            double limited = Math.Max(min, Math.Min(max, v));
+            if (limited.ToString("R", CultureInfo.InvariantCulture) != Get(key)) Store(key, limited.ToString("R", CultureInfo.InvariantCulture));
         }
 
         private void Parse(string line)
@@ -64,7 +75,7 @@ namespace OnkeyDesktopPet
                 foreach (KeyValuePair<string, string> pair in values) lines.Add(pair.Key + "=" + pair.Value);
                 File.WriteAllLines(path, lines.ToArray());
             }
-            catch { /* Settings that can't be saved still apply until Onkey exits. */ }
+            catch (Exception ex) { Log.Error("Saving settings", ex); /* They still apply until Onkey exits. */ }
         }
     }
 }
