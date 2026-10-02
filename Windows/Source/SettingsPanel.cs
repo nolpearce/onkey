@@ -28,6 +28,11 @@ namespace OnkeyDesktopPet
         private int current;
         private Widget pressed, hovered;
         private Bitmap backdrop, head;
+        private readonly Timer animator = new Timer();
+        private readonly System.Diagnostics.Stopwatch clock = new System.Diagnostics.Stopwatch();
+        private double fade, fadeTarget = 1;   // 0 hidden ... 1 fully shown.
+        private Point home;
+        private Size slideFrom;
         public readonly Font TitleFont, TabFont, LabelFont, ChipFont, SmallFont;
 
         private sealed class Page
@@ -64,6 +69,8 @@ namespace OnkeyDesktopPet
 
             BuildPages();
             app.SettingsChanged += Changed;
+            animator.Interval = 15;
+            animator.Tick += delegate { Animate(); };
         }
 
         // Shows the panel beside the tray, on whichever side of the screen the taskbar is.
@@ -77,16 +84,58 @@ namespace OnkeyDesktopPet
             else if (cursor.Y < work.Top) y = work.Top + gap;
             else if (cursor.X >= work.Right) x = work.Right - w - gap;
             else if (cursor.X < work.Left) x = work.Left + gap;
-            Location = new Point(x, y);
+            home = new Point(x, y);
+            // It glides in from the taskbar's side (from below, for a taskbar along the bottom).
+            int lift = (int)(12 * scale);
+            slideFrom = cursor.Y >= work.Bottom ? new Size(0, lift) : cursor.Y < work.Top ? new Size(0, -lift)
+                      : cursor.X >= work.Right ? new Size(lift, 0) : cursor.X < work.Left ? new Size(-lift, 0) : new Size(0, lift);
+            Opacity = 0;
+            Location = home + slideFrom;
             Show();
             Activate();
+            fade = 0;
+            fadeTarget = 1;
+            clock.Restart();
+            animator.Start();
         }
 
         // Clicking anywhere else closes it, like a menu.
         protected override void OnDeactivate(EventArgs e)
         {
             base.OnDeactivate(e);
-            if (pressed == null) Close();
+            if (pressed == null) FadeOut();
+        }
+
+        // True while it's fading away; it's as good as closed.
+        public bool FadingOut { get { return fadeTarget == 0; } }
+
+        // Fades and slides back toward the taskbar, then closes.
+        public void FadeOut()
+        {
+            if (FadingOut || IsDisposed) return;
+            fadeTarget = 0;
+            animator.Start();
+        }
+
+        // Runs the fade and the switches' slides, about 60 times a second while the panel is open.
+        private void Animate()
+        {
+            double dt = Math.Min(0.05, clock.Elapsed.TotalSeconds);
+            clock.Restart();
+            if (fade != fadeTarget)
+            {
+                // About 0.18 s in and 0.13 s out, easing at the end.
+                fade = fadeTarget > fade ? Math.Min(1, fade + dt / 0.18) : Math.Max(0, fade - dt / 0.13);
+                double eased = 1 - Math.Pow(1 - fade, 3);
+                Opacity = eased;
+                Location = new Point(home.X + (int)Math.Round(slideFrom.Width * (1 - eased)),
+                                     home.Y + (int)Math.Round(slideFrom.Height * (1 - eased)));
+                if (fade == 0) { animator.Stop(); Close(); return; }
+            }
+            bool moving = false;
+            foreach (Widget w in always) moving |= w.Animate(dt);
+            foreach (Widget w in pages[current].Widgets) moving |= w.Animate(dt);
+            if (moving) Invalidate();
         }
 
         protected override CreateParams CreateParams
@@ -104,6 +153,7 @@ namespace OnkeyDesktopPet
             if (disposing)
             {
                 app.SettingsChanged -= Changed;
+                animator.Dispose();
                 if (backdrop != null) backdrop.Dispose();
                 if (head != null) head.Dispose();
                 TitleFont.Dispose(); TabFont.Dispose(); LabelFont.Dispose(); ChipFont.Dispose(); SmallFont.Dispose();
@@ -130,7 +180,7 @@ namespace OnkeyDesktopPet
                 qx += w + 8;
                 always.Add(q);
             }
-            SketchButton quit = new SketchButton("Exit Onkey", delegate { Close(); app.Exit(); });
+            SketchButton quit = new SketchButton("Exit Onkey", delegate { animator.Stop(); Close(); app.Exit(); });
             quit.Form = this;
             quit.Small = true;
             quit.Bounds = new RectangleF(LabelLeft, FooterTop + 12, 0, 30);
@@ -465,7 +515,7 @@ namespace OnkeyDesktopPet
         protected override void OnKeyDown(KeyEventArgs e)
         {
             base.OnKeyDown(e);
-            if (e.KeyCode == Keys.Escape) Close();
+            if (e.KeyCode == Keys.Escape) FadeOut();
             else if (e.Control && e.KeyCode == Keys.Tab) SelectPage((current + (e.Shift ? pages.Count - 1 : 1)) % pages.Count);
         }
 
@@ -720,6 +770,23 @@ namespace OnkeyDesktopPet
         public virtual void Down(PointF p) { }
         public virtual void Drag(PointF p) { }
         public virtual void Up(PointF p) { }
+        // Moves any animation on by dt seconds; true while it still needs redrawing.
+        public virtual bool Animate(double dt) { return false; }
+
+        // Eases `shown` toward 0 or 1 (about 0.15 s for the whole way); true while it's moving.
+        protected static bool Ease(ref float shown, bool on, double dt)
+        {
+            float target = on ? 1 : 0;
+            if (shown < 0 || Math.Abs(shown - target) < 0.004f) { shown = target; return false; }
+            shown += (target - shown) * (float)Math.Min(1, dt * 16);
+            return true;
+        }
+
+        protected static Color Mix(Color a, Color b, float t)
+        {
+            t = Math.Max(0, Math.Min(1, t));
+            return Color.FromArgb((int)(a.A + (b.A - a.A) * t), (int)(a.R + (b.R - a.R) * t), (int)(a.G + (b.G - a.G) * t), (int)(a.B + (b.B - a.B) * t));
+        }
 
         protected static Color Dim(Color c, bool enabled) { return enabled ? c : Color.FromArgb(90, c); }
     }
@@ -730,6 +797,7 @@ namespace OnkeyDesktopPet
         private readonly Func<bool> get;
         private readonly Action<bool> set;
         private const float W = 62, H = 30;
+        private float shown = -1;   // Where the knob is drawn: 0 off ... 1 on.
 
         public Toggle(Func<bool> get, Action<bool> set) { this.get = get; this.set = set; }
 
@@ -738,23 +806,31 @@ namespace OnkeyDesktopPet
         // The whole row, label included.
         public override RectangleF HitArea() { return RectangleF.FromLTRB(SettingsPanel.LabelLeft, RowTop, Bounds.Right, RowBottom); }
 
+        public override bool Animate(double dt) { return Ease(ref shown, get(), dt); }
+
         public override void Paint(Graphics g, bool enabled, bool hover)
         {
-            bool on = get();
+            float t = shown < 0 ? (get() ? 1 : 0) : shown;
             RectangleF pod = new RectangleF(Bounds.Left, Bounds.Top, W, H);
             int seed = Sketch.Seed(pod);
             using (GraphicsPath path = Sketch.Box(pod, H / 2, seed, 1.1f))
             {
-                using (Brush b = new SolidBrush(Dim(on ? Jungle.Leaf : Color.FromArgb(222, 208, 172), enabled))) g.FillPath(b, path);
+                using (Brush b = new SolidBrush(Dim(Mix(Color.FromArgb(222, 208, 172), Jungle.Leaf, t), enabled))) g.FillPath(b, path);
                 Sketch.Stroke(g, path, Dim(Jungle.Ink, enabled), hover ? 2.6f : 2f);
             }
-            float knobX = on ? pod.Right - H / 2 - 1 : pod.Left + H / 2 + 1;
-            using (GraphicsPath knob = Sketch.Circle(new PointF(knobX, pod.Top + H / 2), H / 2 - 4, seed + 3, 0.8f))
+            float left = pod.Left + H / 2 + 1, right = pod.Right - H / 2 - 1;
+            float knobX = left + (right - left) * t;
+            // The knob keeps its wobble as it slides, rather than re-shaking every frame.
+            using (GraphicsPath knob = Sketch.Circle(new PointF(left, pod.Top + H / 2), H / 2 - 4, seed + 3, 0.8f))
+            using (Matrix move = new Matrix())
             {
-                using (Brush b = new SolidBrush(Dim(on ? Jungle.Banana : Jungle.Paper, enabled))) g.FillPath(b, knob);
+                move.Translate(knobX - left, 0);
+                knob.Transform(move);
+                using (Brush b = new SolidBrush(Dim(Mix(Jungle.Paper, Jungle.Banana, t), enabled))) g.FillPath(b, knob);
                 Sketch.Stroke(g, knob, Dim(Jungle.Ink, enabled), 1.8f);
             }
-            if (on) Jungle.DrawLeaf(g, new PointF(knobX - 5, pod.Top + H / 2 + 2), -40, 13, 6, Dim(Jungle.LeafDark, enabled), seed);
+            if (t > 0.05f)
+                Jungle.DrawLeaf(g, new PointF(knobX - 5, pod.Top + H / 2 + 2), -40, 13 * t, 6 * t, Dim(Color.FromArgb((int)(255 * t), Jungle.LeafDark), enabled), seed);
         }
 
         public override void Up(PointF p) { if (HitArea().Contains(p)) set(!get()); }
@@ -1022,10 +1098,12 @@ namespace OnkeyDesktopPet
         private readonly Func<bool> get;
         private readonly Action flip;
         private bool down;
+        private float shown = -1;
 
         public QuickToggle(string text, Func<bool> get, Action flip) { this.text = text; this.get = get; this.flip = flip; }
 
         public override float Measure(float width) { return 28; }
+        public override bool Animate(double dt) { return Ease(ref shown, get(), dt); }
 
         public float Width()
         {
@@ -1035,23 +1113,23 @@ namespace OnkeyDesktopPet
 
         public override void Paint(Graphics g, bool enabled, bool hover)
         {
-            bool on = get();
+            float t = shown < 0 ? (get() ? 1 : 0) : shown;
             RectangleF r = Bounds;
             if (down) r.Offset(0.5f, 1.5f);
             using (GraphicsPath path = Sketch.Box(r, 13, Sketch.Seed(Bounds), 1.2f))
             {
-                Color fill = on ? Jungle.Leaf : hover ? Color.FromArgb(255, 246, 222) : Jungle.Paper;
+                Color fill = Mix(hover ? Color.FromArgb(255, 246, 222) : Jungle.Paper, Jungle.Leaf, t);
                 using (Brush b = new SolidBrush(fill)) g.FillPath(b, path);
-                Sketch.Stroke(g, path, Jungle.Ink, on ? 2.2f : 1.6f);
+                Sketch.Stroke(g, path, Jungle.Ink, 1.6f + 0.6f * t);
             }
-            // A little dot: a banana when on, an empty seed when off.
-            using (GraphicsPath dot = Sketch.Circle(new PointF(r.Left + 12, r.Top + r.Height / 2), 4.5f, (int)r.X, 0.5f))
+            // A little dot: a banana when on, an empty seed when off. It swells as it turns on.
+            using (GraphicsPath dot = Sketch.Circle(new PointF(r.Left + 12, r.Top + r.Height / 2), 4.5f + (float)Math.Sin(t * Math.PI) * 1.5f, (int)r.X, 0.5f))
             {
-                using (Brush b = new SolidBrush(on ? Jungle.Banana : Color.FromArgb(222, 208, 172))) g.FillPath(b, dot);
+                using (Brush b = new SolidBrush(Mix(Color.FromArgb(222, 208, 172), Jungle.Banana, t))) g.FillPath(b, dot);
                 using (Pen ink = new Pen(Jungle.Ink, 1.2f)) g.DrawPath(ink, dot);
             }
             SizeF size = g.MeasureString(text, Form.ChipFont);
-            Jungle.Text(g, text, Form.ChipFont, on ? Jungle.Paper : Jungle.Ink, new PointF(r.Left + 21, r.Top + (r.Height - size.Height) / 2));
+            Jungle.Text(g, text, Form.ChipFont, Mix(Jungle.Ink, Jungle.Paper, t), new PointF(r.Left + 21, r.Top + (r.Height - size.Height) / 2));
         }
 
         public override void Down(PointF p) { down = true; }

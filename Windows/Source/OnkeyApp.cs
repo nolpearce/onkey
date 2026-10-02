@@ -233,7 +233,7 @@ namespace OnkeyDesktopPet
         // Pops the settings panel up beside the tray icon.
         public void ShowSettings(Point near)
         {
-            if (panel != null) { panel.Activate(); return; }
+            if (panel != null) { if (!panel.FadingOut) panel.Activate(); return; }
             panel = new SettingsPanel(this, updater);
             panel.FormClosed += delegate { panel = null; panelClosed = DateTime.Now; };
             panel.ShowNear(near);
