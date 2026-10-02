@@ -67,6 +67,7 @@ Filename: "{app}\Onkey.exe"; Description: "Start Onkey now"; Flags: nowait posti
 ; Files later updates bring that the installer didn't put there.
 Type: filesandordirs; Name: "{app}\Source"
 Type: files; Name: "{app}\Start Onkey.vbs"
+Type: files; Name: "{app}\Onkey.old*.exe"
 
 [Code]
 // A running Onkey holds Onkey.exe open, so close him before copying and before uninstalling.

@@ -94,15 +94,18 @@ final class Updater {
         lastChecked = Date()
         switch result {
         case .success(let release):
+            if let release, available?.version != release.version { Log.info("Onkey \(release.version) is available") }
             available = release
             set(release == nil ? .upToDate : .available)
         case .failure(let error):
+            Log.error("Checking for updates", error)
             // Keep showing a release already found; otherwise say what went wrong.
             set(available != nil ? .available : .failed("Couldn't reach GitHub. \(error.localizedDescription)"))
         }
     }
 
     private func set(_ new: Phase) {
+        if case .failed(let problem) = new { Log.warn("Update failed: \(problem)") }
         phase = new
         onChange?()
     }
@@ -131,12 +134,16 @@ final class Updater {
             set(.failed("Onkey can't write to \(app.deletingLastPathComponent().path). Drag Onkey.app into Applications, open him from there, and try again."))
             return
         }
+        Log.info("Updating to \(release.version) from \(release.download.absoluteString) into \(app.path)")
         progress = 0
         set(.downloading)
-        let task = URLSession.shared.downloadTask(with: release.download) { [weak self] file, _, error in
+        let task = URLSession.shared.downloadTask(with: release.download) { [weak self] file, response, error in
             let outcome: Result<URL, Error>
-            if let file {
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 200
+            if let file, status == 200 {
                 outcome = Result { try Self.unpack(file, release: release, beside: app) }
+            } else if file != nil {
+                outcome = .failure(UpdateError("GitHub answered the download with HTTP \(status). Try again later."))
             } else {
                 outcome = .failure(error ?? UpdateError("The download didn't finish."))
             }
@@ -145,11 +152,13 @@ final class Updater {
                 self.progressWatch = nil
                 switch outcome {
                 case .success(let newApp):
+                    Log.info("Downloaded and unpacked into \(newApp.path)")
                     self.progress = 1
                     self.set(.restarting)
                     // A beat to show "Restarting", then swap.
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { self.relaunch(replacing: app, with: newApp) }
                 case .failure(let error):
+                    Log.error("Downloading the update", error)
                     self.set(.failed("The update didn't work. \(error.localizedDescription)"))
                 }
             }
@@ -168,6 +177,7 @@ final class Updater {
     // Checks the download and unzips it into a scratch folder on the same disk as the app,
     // returning the new Onkey.app. Runs off the main thread.
     private static func unpack(_ zip: URL, release: Release, beside app: URL) throws -> URL {
+        if release.sha256 == nil { Log.warn("The release lists no checksum for \(assetName), so it isn't checked") }
         if let expected = release.sha256 {
             let digest = SHA256.hash(data: try Data(contentsOf: zip)).map { String(format: "%02x", $0) }.joined()
             guard digest == expected.lowercased() else {
@@ -188,24 +198,40 @@ final class Updater {
 
     // Quits, and once Onkey has fully exited swaps the new app into place (or moves it in,
     // when he's moving into Applications) and opens it. If the swap fails the old app is put
-    // back and reopened instead.
+    // back and reopened instead. If Onkey hasn't gone after 30 seconds he's stopped. Each
+    // step goes in Onkey's log.
     private func relaunch(replacing app: URL, with newApp: URL) {
         let script = """
-            while kill -0 "$1" 2>/dev/null; do sleep 0.2; done
+            log() { echo "$(date '+%Y-%m-%d %H:%M:%S.000') [$$] INFO [install] $*" >> "$4"; }
+            log "Waiting for Onkey to exit"
+            n=0
+            while kill -0 "$1" 2>/dev/null; do
+                sleep 0.2; n=$((n + 1))
+                if [ $n -eq 150 ]; then log "Onkey hasn't exited after 30 seconds; stopping him"; kill -9 "$1" 2>/dev/null; fi
+            done
             rm -rf "$3.old"
-            if [ ! -e "$3" ]; then mv "$2" "$3"
-            elif mv "$3" "$3.old" && mv "$2" "$3"; then rm -rf "$3.old"; else [ -d "$3" ] || mv "$3.old" "$3"; fi
+            if [ ! -e "$3" ]; then mv "$2" "$3" && log "Moved the new Onkey into $3" || log "Couldn't move the new Onkey into $3"
+            elif mv "$3" "$3.old" && mv "$2" "$3"; then rm -rf "$3.old"; log "Swapped in the new Onkey"
+            else [ -d "$3" ] || mv "$3.old" "$3"; log "Couldn't swap in the new Onkey; kept the old one"; fi
             rm -rf "$(dirname "$2")"
-            open "$3"
+            open "$3" && log "Opened $3" || log "Couldn't open $3"
             """
         let swap = Process()
         swap.executableURL = URL(fileURLWithPath: "/bin/sh")
-        swap.arguments = ["-c", script, "onkey-update", String(getpid()), newApp.path, app.path]
+        swap.arguments = ["-c", script, "onkey-update", String(getpid()), newApp.path, app.path, Log.fileURL.path]
         do {
             try swap.run()
         } catch {
+            Log.error("Starting the swap", error)
             set(.failed("The update didn't work. \(error.localizedDescription)"))
             return
+        }
+        Log.info("Handed over to the swap; quitting")
+        // The swap waits for this Onkey to quit, so if quitting gets stuck, leave anyway.
+        DispatchQueue.global().asyncAfter(deadline: .now() + 8) {
+            Log.warn("Onkey was slow to quit for the update, so he left without tidying up")
+            Log.flush()
+            exit(0)
         }
         NSApp.terminate(nil)
     }

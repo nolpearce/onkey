@@ -32,9 +32,17 @@ close it.
                   then every six hours; turn it off to keep Onkey offline.
                   Open at login.
   Quit Onkey      at the bottom of the panel.
+  Report a problem  beside it. If Onkey crashed, it reads "Send crash
+                  report". It opens a new GitHub issue in your browser with
+                  his version, what went wrong and the end of his log, for
+                  you to check and send; the whole log goes on your
+                  clipboard. Onkey never sends anything himself.
 
 Right-click (or Control-click) the head for a short menu: Pause, Dance to
-Music, Let Me Drag Onkey Around, Settings, and Quit.
+Music, Let Me Drag Onkey Around, Settings, Report a Problem, and Quit.
+
+Onkey keeps a log of what he does (including every step of an update) in
+~/Library/Logs/Onkey/onkey.log, about the last half megabyte of it.
 
 Settings and his position are remembered between launches.
 
@@ -59,6 +67,7 @@ SOURCES
   Renderer.swift        draws his frames from Onkey.png
   Settings.swift        setting names and cached values
   Updater.swift         finds and installs new releases from GitHub
+  Log.swift             his log, crash capture and crash reports
   BeatTracker.swift     finds the beat in audio
   MusicListener.swift   hears what the Mac is playing
 

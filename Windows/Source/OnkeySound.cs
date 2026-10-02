@@ -32,6 +32,7 @@ namespace OnkeyDesktopPet
             {
                 string id = System.Text.Encoding.ASCII.GetString(original, i, 4);
                 int size = BitConverter.ToInt32(original, i + 4);
+                if (size < 0) break;   // A damaged file; play what can be found.
                 if (id == "fmt ")
                 {
                     channels = BitConverter.ToInt16(original, i + 10);
@@ -41,7 +42,7 @@ namespace OnkeyDesktopPet
                 else if (id == "data") { dataStart = i + 8; dataLength = Math.Min(size, original.Length - dataStart); break; }
                 i += 8 + size + (size & 1);
             }
-            if (dataStart < 0 || bits != 16) return;
+            if (dataStart < 0 || bits != 16 || channels <= 0) return;
             int frames = dataLength / (2 * channels), window = Math.Max(1, sampleRate / 60);
             List<double> levels = new List<double>();
             for (int start = 0; start < frames; start += window)

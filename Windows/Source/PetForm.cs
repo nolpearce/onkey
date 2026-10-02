@@ -42,6 +42,9 @@ namespace OnkeyDesktopPet
         public float Squash;
         private LayeredSurface surface;
         private bool dragging, dragMoved, closed;
+        // When drawing fails (the screen locked, asleep, or a remote session dropped), he
+        // waits a moment and tries again with a fresh surface rather than failing every frame.
+        private double retrySurfaceAt;
         private Point grabMouse;
         private double grabX, grabY;
 
@@ -98,7 +101,12 @@ namespace OnkeyDesktopPet
             current = app.Idle; currentBounce = 0; currentBottom = app.IdleBottom;
             ClientSize = new System.Drawing.Size(canvasWidth, canvasHeight);
             if (surface != null) { surface.Dispose(); surface = null; }
-            if (IsHandleCreated) surface = new LayeredSurface(canvasWidth, canvasHeight);
+            // If this fails, Present tries again shortly.
+            if (IsHandleCreated)
+            {
+                try { surface = new LayeredSurface(canvasWidth, canvasHeight); }
+                catch (Exception ex) { Log.Error("Making a drawing surface", ex); }
+            }
             redraw = true;
         }
 
@@ -115,7 +123,6 @@ namespace OnkeyDesktopPet
                 int style = Native.GetWindowLong(Handle, -20);
                 style = app.Settings.Bool("draggable") ? style & ~0x20 : style | 0x20;
                 Native.SetWindowLong(Handle, -20, style);
-                if (surface == null) surface = new LayeredSurface(canvasWidth, canvasHeight);
             }
             redraw = true;
         }
@@ -289,7 +296,28 @@ namespace OnkeyDesktopPet
 
         public void Present()
         {
-            if (closed || surface == null || current == null) return;
+            if (closed || current == null || IsDisposed) return;
+            if (surface == null)
+            {
+                double now = app.Wall.Elapsed.TotalSeconds;
+                if (!IsHandleCreated || now < retrySurfaceAt) return;
+                try { surface = new LayeredSurface(canvasWidth, canvasHeight); redraw = true; }
+                catch (Exception ex) { Log.Error("Making a drawing surface", ex); retrySurfaceAt = now + 2; return; }
+            }
+            try { Draw(); }
+            catch (Exception ex)
+            {
+                // Drawn again from scratch on a new surface in a couple of seconds.
+                Log.Error("Drawing Onkey", ex);
+                try { surface.Dispose(); } catch { }
+                surface = null;
+                redraw = true;
+                retrySurfaceAt = app.Wall.Elapsed.TotalSeconds + 2;
+            }
+        }
+
+        private void Draw()
+        {
             int x = (int)Math.Round(px), y = (int)Math.Round(py);
             byte alpha = (byte)Math.Max(0, Math.Min(255, app.Settings.Number("opacity") * 255));
             // Everything that affects the picture, rounded to what could visibly change it.
@@ -389,7 +417,7 @@ namespace OnkeyDesktopPet
             if (!closed)
             {
                 closed = true;
-                if (surface != null) surface.Dispose();
+                if (surface != null) { surface.Dispose(); surface = null; }
             }
             base.OnFormClosed(e);
         }

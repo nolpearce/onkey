@@ -134,6 +134,7 @@ enum Jungle {
     static let leafMid = Color(red: 72 / 255, green: 128 / 255, blue: 56 / 255)
     static let leafBack = Color(red: 34 / 255, green: 70 / 255, blue: 38 / 255)
     static let banana = Color(red: 244 / 255, green: 200 / 255, blue: 66 / 255)
+    static let berry = Color(red: 214 / 255, green: 84 / 255, blue: 52 / 255)
     static let vine = Color(red: 104 / 255, green: 122 / 255, blue: 52 / 255)
     static let dryVine = Color(red: 196 / 255, green: 176 / 255, blue: 130 / 255)
 
@@ -368,8 +369,17 @@ struct SettingsView: View {
     }
 
     private var footer: some View {
-        HStack {
+        HStack(spacing: 8) {
             SignButton(title: "Quit Onkey", small: true) { model.app.quit() }
+            // After a crash it says so, with a berry on it.
+            let crashed = CrashReport.pending
+            SignButton(title: crashed ? "Send crash report" : "Report a problem", small: true) { model.app.reportProblem() }
+                .overlay(alignment: .topTrailing) {
+                    if crashed {
+                        Circle().fill(Jungle.berry).overlay(Circle().stroke(Jungle.ink, lineWidth: 1.2))
+                            .frame(width: 10, height: 10).offset(x: 2, y: -3).allowsHitTesting(false)
+                    }
+                }
             Spacer()
             Text("v\(Updater.current)").font(Jungle.small).foregroundColor(Jungle.faded)
         }

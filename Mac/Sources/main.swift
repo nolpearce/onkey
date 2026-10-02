@@ -100,6 +100,7 @@ if let i = CommandLine.arguments.firstIndex(of: "--beat-test"), i + 1 < CommandL
     exit(0)
 }
 
+Log.start()
 let app = NSApplication.shared
 let delegate = OnkeyApp()
 app.delegate = delegate

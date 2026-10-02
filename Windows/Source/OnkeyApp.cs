@@ -55,6 +55,8 @@ namespace OnkeyDesktopPet
         private double danceLevel;   // Eases between 0 (still) and 1 (bopping) as music starts and stops.
         private int tickCount;
         private bool exiting;
+        // What the last note by the clock was about ("update" or "crash"), for when it's clicked.
+        private string balloon;
 
         public float PixelScale { get { return (float)Settings.Number("size") * dpi; } }   // Pixels per canvas point.
         public bool Watching { get { return Settings.Bool("watchCursor"); } }
@@ -69,9 +71,16 @@ namespace OnkeyDesktopPet
             assetFolder = Path.Combine(appFolder, "Assets");
             if (!Directory.Exists(assetFolder)) assetFolder = Path.Combine(Path.GetDirectoryName(appFolder.TrimEnd('\\')), "Assets");
             if (IsReleaseFolder(appFolder)) TidyOldInstall();
-            Renderer = new OnkeyRenderer(Path.Combine(assetFolder, "Onkey.png"));
+            string sprite = Path.Combine(assetFolder, "Onkey.png");
+            if (!File.Exists(sprite)) throw new FileNotFoundException("Onkey's picture is missing from " + assetFolder + ". Download him again from github.com/nolpearce/onkey.", sprite);
+            Renderer = new OnkeyRenderer(sprite);
             string soundPath = Path.Combine(assetFolder, Path.Combine("Sounds", "oooo.wav"));
-            if (File.Exists(soundPath)) { try { Sound = new OnkeySound(soundPath); } catch { Sound = null; } }
+            if (File.Exists(soundPath))
+            {
+                try { Sound = new OnkeySound(soundPath); }
+                catch (Exception ex) { Log.Error("Loading his sound", ex); Sound = null; }
+            }
+            else Log.Warn("No sound clip at " + soundPath);
             using (Graphics g = Graphics.FromHwnd(IntPtr.Zero)) dpi = g.DpiX / 96f;
             RenderFrames();
 
@@ -93,14 +102,49 @@ namespace OnkeyDesktopPet
             BuildMenu();
             tray.Visible = true;
             if (Settings.Bool("dance")) StartListening();
-            updater = new Updater(appFolder, tray, Exit, ShowUpdates);
+            updater = new Updater(appFolder, delegate(string title, string text) { Announce("update", title, text); }, Exit);
             updater.Changed += RefreshMenu;
             if (Settings.Bool("checkUpdates")) updater.StartAutomaticChecks();
+            tray.BalloonTipClicked += delegate
+            {
+                if (balloon == "update" && updater.Available != null) ShowUpdates();
+                else if (balloon == "crash") ShowSettings(Cursor.Position);
+            };
+            // Mention a crash once; after that the panel's footer still offers the report.
+            string crash = Log.PendingCrash;
+            if (crash != null)
+            {
+                string when = crash.Split('\n')[0].Trim();
+                if (Settings.Get("announcedCrash") != when)
+                {
+                    Settings.Set("announcedCrash", when);
+                    Announce("crash", "Onkey hit a problem last time", "Click here to send a crash report, so it can be fixed.");
+                }
+            }
+            if (IsReleaseFolder(appFolder))
+            {
+                // The installer keeps the old Onkey.exe for a few seconds in case this one
+                // doesn't start, so tidy it away a little later.
+                System.Windows.Forms.Timer later = new System.Windows.Forms.Timer();
+                later.Interval = 60000;
+                later.Tick += delegate { later.Dispose(); RemoveOldExes(); };
+                later.Start();
+            }
             SystemEvents.DisplaySettingsChanged += OnDisplayChanged;
             lastTick = Wall.Elapsed.TotalSeconds;
             timer.Interval = 33;
             timer.Tick += delegate { Tick(); };
             timer.Start();
+            Log.Info("Onkey is up: " + pets.Count + " on screen, sound " + (Sound != null ? "loaded" : "missing")
+                + ", " + Screen.AllScreens.Length + " screen(s) at " + Math.Round(dpi * 100) + "% scale");
+        }
+
+        // A note by the clock.
+        private void Announce(string about, string title, string text)
+        {
+            balloon = about;
+            try { tray.ShowBalloonTip(8000, title, text, ToolTipIcon.Info); }
+            catch (Exception ex) { Log.Error("Showing a note by the clock", ex); }
         }
 
         // Onkeys
@@ -202,6 +246,7 @@ namespace OnkeyDesktopPet
             ToolStripMenuItem settingsItem = Item("Settings...", delegate { ShowSettings(Cursor.Position); });
             settingsItem.Font = new Font(settingsItem.Font, FontStyle.Bold);
             menu.Items.Add(settingsItem);
+            menu.Items.Add(Item("Report a problem...", delegate { CrashReport.Send(); }));
             menu.Items.Add(Item("Exit Onkey", delegate { Exit(); }));
 
             tray.Icon = MakeTrayIcon();
@@ -323,11 +368,16 @@ namespace OnkeyDesktopPet
             bool desktop = Settings.Get("layer") == "desktop";
             foreach (PetForm pet in pets.ToArray())
             {
-                if (!Paused && !pet.Dragging) pet.Walk(dt);
-                pet.UpdateFace(now, dt);
-                pet.Squash = squash;
-                pet.Present();
-                if (restack) { if (desktop) pet.SendToBottom(); else pet.BringToTop(); }
+                // One Onkey going wrong mustn't stop the others.
+                try
+                {
+                    if (!Paused && !pet.Dragging) pet.Walk(dt);
+                    pet.UpdateFace(now, dt);
+                    pet.Squash = squash;
+                    pet.Present();
+                    if (restack) { if (desktop) pet.SendToBottom(); else pet.BringToTop(); }
+                }
+                catch (Exception ex) { Log.Error("Moving an Onkey", ex); }
             }
         }
 
@@ -336,7 +386,11 @@ namespace OnkeyDesktopPet
         // out as music starts and stops.
         private float BeatSquash(double now, double dt)
         {
-            if (Settings.Bool("dance")) listener.Poll(now);
+            if (Settings.Bool("dance"))
+            {
+                try { listener.Poll(now); }
+                catch (Exception ex) { Log.Error("Listening to music", ex); }
+            }
             BeatTracker.Beat beat = listener.Current;
             double target = Settings.Bool("dance") && beat.Active && !Paused ? 1 : 0;
             danceLevel += (target - danceLevel) * Math.Min(1, dt * 3);
@@ -361,6 +415,7 @@ namespace OnkeyDesktopPet
             try { listener.Start(Wall.Elapsed.TotalSeconds); }
             catch (Exception ex)
             {
+                Log.Error("Starting to listen to music", ex);
                 listener.Dispose();
                 Settings.Set("dance", "false");
                 RefreshMenu();
@@ -370,8 +425,16 @@ namespace OnkeyDesktopPet
 
         private void OnDisplayChanged(object sender, EventArgs e)
         {
-            if (pets.Count == 0 || !pets[0].IsHandleCreated) return;
-            pets[0].BeginInvoke((MethodInvoker)delegate { foreach (PetForm pet in pets) pet.ScreensChanged(); });
+            try
+            {
+                if (pets.Count == 0 || !pets[0].IsHandleCreated) return;
+                pets[0].BeginInvoke((MethodInvoker)delegate
+                {
+                    Log.Info("Screens changed: " + Screen.AllScreens.Length + " now");
+                    foreach (PetForm pet in pets.ToArray()) pet.ScreensChanged();
+                });
+            }
+            catch (Exception ex) { Log.Error("Following a screen change", ex); }
         }
 
         public void SavePosition()
@@ -488,6 +551,19 @@ namespace OnkeyDesktopPet
             catch { }
         }
 
+        // The old Onkey.exe the installer set aside during the last update.
+        private void RemoveOldExes()
+        {
+            try
+            {
+                foreach (string old in Directory.GetFiles(appFolder, "Onkey.old*.exe"))
+                {
+                    try { File.Delete(old); } catch { /* Still in use; next time. */ }
+                }
+            }
+            catch { }
+        }
+
         private static string LoginCommand { get { return "\"" + Application.ExecutablePath + "\""; } }
 
         public void ToggleLogin()
@@ -502,31 +578,47 @@ namespace OnkeyDesktopPet
             }
             catch (Exception ex)
             {
+                Log.Error("Changing the startup setting", ex);
                 MessageBox.Show("Couldn't change the startup setting: " + ex.Message, "Onkey");
             }
             RefreshMenu();
         }
 
+        // Tidies up and quits. Each step is on its own, so one failing can't stop him exiting
+        // (which matters most during an update, when the new Onkey is waiting to replace him).
         public void Exit()
         {
             if (exiting) return;
             exiting = true;
-            SavePosition();
-            if (panel != null) panel.Close();
-            SystemEvents.DisplaySettingsChanged -= OnDisplayChanged;
-            timer.Stop(); timer.Dispose();
-            foreach (PetForm pet in pets.ToArray()) pet.Close();
+            Log.Info("Exiting");
+            Safely("saving his position", SavePosition);
+            Safely("stopping the clock", delegate { timer.Stop(); timer.Dispose(); });
+            Safely("closing the panel", delegate { if (panel != null) panel.Close(); });
+            Safely("unhooking screen changes", delegate { SystemEvents.DisplaySettingsChanged -= OnDisplayChanged; });
+            foreach (PetForm pet in pets.ToArray()) Safely("closing an Onkey", pet.Close);
             pets.Clear();
-            tray.Visible = false;
-            if (tray.ContextMenuStrip != null) tray.ContextMenuStrip.Dispose();
-            if (tray.Icon != null) Native.DestroyIcon(tray.Icon.Handle);
-            tray.Dispose();
-            if (Sound != null) Sound.Dispose();
-            listener.Dispose();
-            foreach (Bitmap f in Frames) f.Dispose();
-            if (Idle != null) Idle.Dispose();
-            Renderer.Dispose();
+            Safely("removing the tray icon", delegate
+            {
+                tray.Visible = false;
+                if (tray.ContextMenuStrip != null) tray.ContextMenuStrip.Dispose();
+                if (tray.Icon != null) Native.DestroyIcon(tray.Icon.Handle);
+                tray.Dispose();
+            });
+            Safely("stopping his sound", delegate { if (Sound != null) Sound.Dispose(); });
+            Safely("stopping listening", listener.Dispose);
+            Safely("freeing his pictures", delegate
+            {
+                foreach (Bitmap f in Frames) f.Dispose();
+                if (Idle != null) Idle.Dispose();
+                Renderer.Dispose();
+            });
             ExitThread();
+        }
+
+        private static void Safely(string what, MethodInvoker step)
+        {
+            try { step(); }
+            catch (Exception ex) { Log.Error("Exiting: " + what, ex); }
         }
     }
 }

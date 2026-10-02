@@ -36,9 +36,18 @@ SETTINGS PANEL (click the tray icon)
                   hours, with a note by the clock when a new version is out.
                   Open at startup: when Windows starts.
   Exit Onkey      at the bottom of the panel.
+  Report a problem  beside it. If Onkey crashed, it reads "Send crash
+                  report" (and a note by the clock says so the next time he
+                  starts). It opens a new GitHub issue in your browser with
+                  his version, what went wrong and the end of his log, for
+                  you to check and send; the whole log goes on your
+                  clipboard. Onkey never sends anything himself.
 
 Right-click the icon for a short menu: Pause, Dance to music, Let me drag
-Onkey around, Settings, and Exit.
+Onkey around, Settings, Report a problem, and Exit.
+
+Onkey keeps a log of what he does (including every step of an update) in
+%APPDATA%\Onkey\onkey.log, about the last half megabyte of it.
 
 Settings and his position are saved in %APPDATA%\Onkey\settings.txt.
 "Open at startup" adds an entry under
