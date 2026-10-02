@@ -1,7 +1,9 @@
 #!/bin/zsh
-# Builds the Mac release download, dist/Onkey-Mac.zip (Onkey.app for Apple silicon + Intel).
-# Onkey-Windows.zip is built on Windows by .github/workflows/windows-release.yml and
-# attached to the release when it's published.
+# Builds the Mac release downloads into dist/ (Onkey.app for Apple silicon + Intel):
+#   Onkey-Mac.dmg  the download for people: open it and drag Onkey into Applications
+#   Onkey-Mac.zip  what the in-app updater downloads; keep the name
+# The Windows downloads (Onkey-Windows-Setup.exe and Onkey-Windows.zip) are built on Windows
+# by .github/workflows/windows-release.yml and attached to the release when it's published.
 # Needs a Mac with the Xcode Command Line Tools.
 set -euo pipefail
 root="${0:A:h}"
@@ -19,6 +21,7 @@ mkdir -p "$dist"
 
 "$root/Mac/build.sh" --no-install
 ditto -c -k --norsrc --keepParent "$root/Mac/Onkey.app" "$dist/Onkey-Mac.zip"
+"$root/Mac/make-dmg.sh" "$root/Mac/Onkey.app" "$dist/Onkey-Mac.dmg"
 rm -rf "$root/Mac/Onkey.app"
 
 ls -lh "$dist"

@@ -1,12 +1,14 @@
 ONKEY DESKTOP PET - VERSION 4.5.1 - WINDOWS
 
 START
-1. Exit any older Onkey from its tray icon first.
-2. Keep all the files together in one folder.
-3. Double-click "Onkey.exe". The first time, Windows may say it protected
-   your PC because Onkey isn't from a known publisher: click "More info",
-   then "Run anyway".
-4. Click Onkey's icon beside the Windows clock and a hand-drawn jungle
+1. Open Onkey-Windows-Setup.exe. Windows may say it protected your PC
+   because Onkey isn't from a known publisher: click "More info", then
+   "Run anyway". Click through the installer; it needs no administrator
+   password and starts Onkey at the end. Next time, start him from the
+   Start menu. To remove him, use Settings > Apps.
+   (From Onkey-Windows.zip instead: keep all the files together in one
+   folder and double-click "Onkey.exe".)
+2. Click Onkey's icon beside the Windows clock and a hand-drawn jungle
    settings panel pops up. Expand the ^ arrow if the icon is hidden.
    Click anywhere else (or press Escape) to close it.
 

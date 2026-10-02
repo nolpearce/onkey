@@ -1,11 +1,20 @@
-# Builds Onkey-Windows.zip on Windows and attaches it to the release, so the Windows
-# download is always a freshly built Onkey.exe. Runs when a release is published, or by
-# hand for an existing tag (Actions > Windows release > Run workflow).
+# Builds the Windows downloads on Windows and attaches them to the release, so they always
+# hold a freshly built Onkey.exe:
+#   Onkey-Windows-Setup.exe  the download for people (an installer, from Windows/installer.iss)
+#   Onkey-Windows.zip        what the in-app updater downloads; keep the name
+# Runs when a release is published, or by hand for an existing tag (Actions > Windows
+# release > Run workflow). On a pull request that touches the Windows build it only builds
+# them and keeps them as the run's artifacts, for trying out before a release.
 name: Windows release
 
 on:
   release:
     types: [published]
+  pull_request:
+    paths:
+      - Windows/**
+      - Assets/**
+      - .github/workflows/windows-release.yml
   workflow_dispatch:
     inputs:
       tag:
@@ -23,9 +32,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.TAG }}
+          ref: ${{ env.TAG || github.sha }}
 
       - name: Check the version matches the tag
+        if: env.TAG != ''
         shell: pwsh
         run: |
           $version = (Select-String -Path Windows/Source/Program.cs -Pattern 'Version = "(.*)";').Matches[0].Groups[1].Value
@@ -62,8 +72,31 @@ jobs:
           $zip.Entries | ForEach-Object { $_.FullName }
           $zip.Dispose()
 
+      - name: Make Onkey-Windows-Setup.exe
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path Windows/Source/Program.cs -Pattern 'Version = "(.*)";').Matches[0].Groups[1].Value
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup --no-progress -y
+            if ($LASTEXITCODE -ne 0) { throw "Couldn't install Inno Setup." }
+          }
+          & $iscc /Qp "/DVersion=$version" Windows/installer.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed." }
+          Get-Item dist/Onkey-Windows-Setup.exe
+
+      - name: Keep the downloads with this run
+        if: env.TAG == ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: Onkey-Windows
+          path: |
+            dist/Onkey-Windows-Setup.exe
+            dist/Onkey-Windows.zip
+
       - name: Attach to the release
+        if: env.TAG != ''
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload $env:TAG dist/Onkey-Windows.zip --clobber --repo ${{ github.repository }}
+        run: gh release upload $env:TAG dist/Onkey-Windows-Setup.exe dist/Onkey-Windows.zip --clobber --repo ${{ github.repository }}

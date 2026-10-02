@@ -25,10 +25,10 @@ cp "$assets/Sounds/oooo.wav" "$app/Contents/Resources/Sounds/"
 echo "Making icon..."
 iconset="$work/AppIcon.iconset"
 mkdir -p "$iconset"
-sips -p 2000 2000 "$assets/Onkey.png" --out "$work/square.png" >/dev/null
+# AppIcon.png is drawn by Assets/Installer/make-art.py.
 for size in 16 32 128 256 512; do
-    sips -z $size $size "$work/square.png" --out "$iconset/icon_${size}x${size}.png" >/dev/null
-    sips -z $((size * 2)) $((size * 2)) "$work/square.png" --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
+    sips -z $size $size "$assets/AppIcon.png" --out "$iconset/icon_${size}x${size}.png" >/dev/null
+    sips -z $((size * 2)) $((size * 2)) "$assets/AppIcon.png" --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
 done
 iconutil -c icns "$iconset" -o "$app/Contents/Resources/AppIcon.icns"
 
