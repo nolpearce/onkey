@@ -23,7 +23,7 @@ namespace OnkeyDesktopPet
     public static class Program
     {
         // Compared with the latest GitHub release to find updates; keep it in step with README.txt.
-        public const string Version = "4.5.2";
+        public const string Version = "4.5.3";
 
         // Errors on the UI thread in the last few seconds; too many at once means he's stuck.
         private static readonly Queue<DateTime> recentErrors = new Queue<DateTime>();
