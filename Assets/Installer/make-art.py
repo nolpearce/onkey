@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Draws the jungle pictures for the Mac DMG window and the Windows installer, in the same
+# Draws the jungle pictures for the Mac app icon, the Mac DMG window and the Windows installer, in the same
 # hand-drawn style and colours as the settings panel (Mac/Sources/SettingsPanel.swift).
 # The pictures are checked in, so this only needs running again to change them:
 #
@@ -8,7 +8,7 @@
 #
 # Patrick Hand is a free handwriting font from Google Fonts (fonts.google.com/specimen/Patrick+Hand).
 import math, os, random, sys
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 here = os.path.dirname(os.path.abspath(__file__))
 font_path = sys.argv[1]
@@ -200,7 +200,31 @@ def wizard_small(scale):
     return c
 
 
+# The Mac app icon (Assets/AppIcon.png): Onkey peeking over a paper ledge in the jungle,
+# on Apple's icon grid (an 824-point rounded square in a 1024 canvas, with a soft shadow).
+def app_icon():
+    size, body, inset = 1024, 824, 100
+    c = Canvas(body, body, 1)
+    backdrop(c, seed=21, leaves_per_layer=3, leaf_size=150, vines=4)
+    rng = random.Random(9)
+    sketch_box(c, -40, 640, body + 80, 260, 40, rng, paper, width=9)
+    c.paste(sprite, body / 2, 686, 980)
+    art = c.img.resize((body, body), Image.LANCZOS).convert("RGBA")
+    mask = Image.new("L", (body * SS, body * SS), 0)
+    ImageDraw.Draw(mask).rounded_rectangle([0, 0, body * SS - 1, body * SS - 1], radius=185 * SS, fill=255)
+    art.putalpha(mask.resize((body, body), Image.LANCZOS))
+    icon = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    shadow = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    shadow.paste((0, 0, 0, 90), (inset, inset + 12), art.getchannel("A"))
+    icon.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(14)))
+    icon.alpha_composite(art, (inset, inset))
+    path = os.path.join(here, "..", "AppIcon.png")
+    icon.save(path)
+    print("wrote", os.path.relpath(path), icon.size)
+
+
 out = here
+app_icon()
 dmg(1).save(os.path.join(out, "dmg-background.png"))
 dmg(2).save(os.path.join(out, "dmg-background@2x.png"))
 wizard_side(1).save(os.path.join(out, "wizard.bmp"))

@@ -36,8 +36,8 @@ Download `Onkey-Windows-Setup.exe` from [Releases](https://github.com/nolpearce/
 ## Layout
 
 ```
-Assets/      Onkey.png (the sprite both versions draw from), Sounds/, Preview.gif
-Assets/Installer/  the jungle pictures for the DMG window and the Windows installer (make-art.py)
+Assets/      Onkey.png (the sprite both versions draw from), AppIcon.png (the Mac app icon), Sounds/, Preview.gif
+Assets/Installer/  the jungle pictures for the Mac icon, DMG window and Windows installer (make-art.py)
 Mac/         Sources/*.swift, build.sh (builds and installs Onkey.app), make-dmg.sh, README.txt
 Windows/     Source/*.cs, build.cmd (builds Onkey.exe), installer.iss, Onkey.ico, README.txt
 package.sh   builds the Mac release downloads into dist/
