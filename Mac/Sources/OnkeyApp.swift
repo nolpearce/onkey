@@ -441,7 +441,11 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
         refreshMenu()
     }
 
-    @objc func checkForUpdates() { updater.menuChosen() }
+    // The menu's update item opens the panel on its Updates tab, where the update happens.
+    @objc func checkForUpdates() {
+        showSettings()
+        settingsPanel?.showTab(SettingsView.updatesTab)
+    }
 
     @objc func quit() { listener.stop(); NSApp.terminate(nil) }
 

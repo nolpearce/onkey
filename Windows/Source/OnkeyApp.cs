@@ -93,7 +93,7 @@ namespace OnkeyDesktopPet
             BuildMenu();
             tray.Visible = true;
             if (Settings.Bool("dance")) StartListening();
-            updater = new Updater(appFolder, tray, Exit);
+            updater = new Updater(appFolder, tray, Exit, ShowUpdates);
             updater.Changed += RefreshMenu;
             if (Settings.Bool("checkUpdates")) updater.StartAutomaticChecks();
             SystemEvents.DisplaySettingsChanged += OnDisplayChanged;
@@ -197,7 +197,7 @@ namespace OnkeyDesktopPet
             menu.Items.Add(Option("Let me drag Onkey around", "draggable"));
             menu.Items.Add(new ToolStripSeparator());
             // Only shown while there's an update to install.
-            updateItem = Item("Update Onkey...", delegate { updater.MenuChosen(); });
+            updateItem = Item("Update Onkey...", delegate { ShowUpdates(); });
             menu.Items.Add(updateItem);
             ToolStripMenuItem settingsItem = Item("Settings...", delegate { ShowSettings(Cursor.Position); });
             settingsItem.Font = new Font(settingsItem.Font, FontStyle.Bold);
@@ -240,6 +240,13 @@ namespace OnkeyDesktopPet
             panel = new SettingsPanel(this, updater);
             panel.FormClosed += delegate { panel = null; panelClosed = DateTime.Now; };
             panel.ShowNear(near);
+        }
+
+        // Opens the panel on its Updates tab, where the whole update happens.
+        public void ShowUpdates()
+        {
+            ShowSettings(Cursor.Position);
+            if (panel != null) panel.ShowUpdates();
         }
 
         // Stores a setting and puts it into effect straight away.
