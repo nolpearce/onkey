@@ -103,7 +103,16 @@ namespace OnkeyDesktopPet
         protected override void OnDeactivate(EventArgs e)
         {
             base.OnDeactivate(e);
-            if (pressed == null) FadeOut();
+            // Wait until the new window is active: if it's one of Onkey's own (a pet changing in
+            // response to a switch here), take focus back rather than closing.
+            BeginInvoke((MethodInvoker)delegate
+            {
+                if (IsDisposed || FadingOut) return;
+                Form now = Form.ActiveForm;
+                if (now == this) return;
+                if (now != null || pressed != null) Activate();
+                else FadeOut();
+            });
         }
 
         // True while it's fading away; it's as good as closed.
