@@ -1,4 +1,4 @@
-ONKEY DESKTOP PET - VERSION 4.5.1 - WINDOWS
+ONKEY DESKTOP PET - VERSION 4.5.2 - WINDOWS
 
 START
 1. Open Onkey-Windows-Setup.exe. Windows may say it protected your PC
