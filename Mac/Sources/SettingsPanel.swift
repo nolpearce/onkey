@@ -12,7 +12,9 @@ final class SettingsPanel {
     private let panel: Panel
     private let model: SettingsModel
     private var clickMonitor: Any?
-    var isShown: Bool { panel.isVisible }
+    var isShown: Bool { panel.isVisible && !closing }
+    private var closing = false
+    private var showCount = 0   // Lets a close that finishes after a reopen leave the panel alone.
     var onClose: (() -> Void)?
 
     // A borderless panel that can still take key presses (for Escape).
@@ -44,9 +46,23 @@ final class SettingsPanel {
         let anchor = buttonWindow.convertToScreen(button.convert(button.bounds, to: nil))
         let screen = (buttonWindow.screen ?? NSScreen.main ?? NSScreen.screens[0]).visibleFrame
         let x = max(screen.minX + 8, min(anchor.midX - Self.size.width / 2, screen.maxX - Self.size.width - 8))
-        panel.setFrameOrigin(NSPoint(x: x, y: anchor.minY - Self.size.height - 6))
+        let home = NSPoint(x: x, y: anchor.minY - Self.size.height - 6)
         model.objectWillChange.send()
+        // It fades in while dropping the last few points into place under the icon.
+        closing = false
+        showCount += 1
+        if !panel.isVisible {
+            panel.alphaValue = 0
+            panel.setFrameOrigin(NSPoint(x: home.x, y: home.y + 10))
+        }
         panel.makeKeyAndOrderFront(nil)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.18
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            panel.animator().alphaValue = 1
+            panel.animator().setFrame(NSRect(origin: home, size: Self.size), display: true)
+        }
+        if let clickMonitor { NSEvent.removeMonitor(clickMonitor) }
         // Clicking anywhere outside Onkey closes it, like a menu.
         clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
             guard let self, !self.panel.frame.contains(NSEvent.mouseLocation) else { return }
@@ -54,12 +70,25 @@ final class SettingsPanel {
         }
     }
 
+    // Fades out while lifting back toward the icon, then hides.
     func close() {
-        guard panel.isVisible else { return }
-        panel.orderOut(nil)
+        guard panel.isVisible, !closing else { return }
+        closing = true
         if let clickMonitor { NSEvent.removeMonitor(clickMonitor) }
         clickMonitor = nil
         onClose?()
+        let shown = showCount
+        let origin = panel.frame.origin
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.13
+            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            panel.animator().alphaValue = 0
+            panel.animator().setFrame(NSRect(origin: NSPoint(x: origin.x, y: origin.y + 6), size: Self.size), display: true)
+        }, completionHandler: { [weak self] in
+            guard let self, self.closing, self.showCount == shown else { return }
+            self.panel.orderOut(nil)
+            self.closing = false
+        })
     }
 }
 
@@ -368,7 +397,7 @@ struct SettingsView: View {
         }
         .frame(width: width, height: height + (selected ? 4 : 0))
         .contentShape(Rectangle())
-        .onTapGesture { tab = i }
+        .onTapGesture { withAnimation(.easeInOut(duration: 0.16)) { tab = i } }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(tabs[i])
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
@@ -601,22 +630,46 @@ struct LeafSwitch: View {
     @Environment(\.isEnabled) private var enabled
 
     var body: some View {
-        Canvas { ctx, size in
-            let pod = CGRect(origin: .zero, size: size).insetBy(dx: 1.5, dy: 1.5)
-            let path = Sketch.box(pod, radius: pod.height / 2, seed: 5, wobble: 1.1)
-            ctx.fill(path, with: .color(isOn ? Jungle.leaf : Jungle.pod))
-            ctx.pencil(path, Jungle.ink, 2)
-            let knobX = isOn ? pod.maxX - pod.height / 2 - 1 : pod.minX + pod.height / 2 + 1
-            let knob = Sketch.circle(CGPoint(x: knobX, y: pod.midY), pod.height / 2 - 4, seed: 8, wobble: 0.8)
-            ctx.fill(knob, with: .color(isOn ? Jungle.banana : Jungle.paper))
-            ctx.pencil(knob, Jungle.ink, 1.8)
-            if isOn { ctx.leaf(at: CGPoint(x: knobX - 5, y: pod.midY + 2), angle: -40, length: 13, width: 6, color: Jungle.leafDark) }
-        }
-        .frame(width: 58, height: 28)
+        SwitchDrawing(t: isOn ? 1 : 0)
+            // A soft spring, so the knob slides across and settles with a little bounce.
+            .animation(.spring(response: 0.3, dampingFraction: 0.68), value: isOn)
+            .frame(width: 58, height: 28)
         .opacity(enabled ? 1 : 0.4)
         .contentShape(Rectangle())
         .onTapGesture { if enabled { isOn.toggle() } }
         .accessibilityRepresentation { Toggle(label, isOn: $isOn) }
+    }
+}
+
+// The switch at a point in its slide: 0 off ... 1 on (a little past either end mid-bounce).
+private struct SwitchDrawing: View, Animatable {
+    var t: Double
+    var animatableData: Double {
+        get { t }
+        set { t = newValue }
+    }
+
+    var body: some View {
+        Canvas { ctx, size in
+            let on = CGFloat(min(1, max(0, t)))
+            let pod = CGRect(origin: .zero, size: size).insetBy(dx: 1.5, dy: 1.5)
+            let path = Sketch.box(pod, radius: pod.height / 2, seed: 5, wobble: 1.1)
+            ctx.fill(path, with: .color(Jungle.pod))
+            ctx.fill(path, with: .color(Jungle.leaf.opacity(Double(on))))
+            ctx.pencil(path, Jungle.ink, 2)
+            let left = pod.minX + pod.height / 2 + 1, right = pod.maxX - pod.height / 2 - 1
+            let knobX = left + (right - left) * CGFloat(t)
+            // The knob keeps its wobble as it slides, rather than re-shaking every frame.
+            let knob = Sketch.circle(CGPoint(x: left, y: pod.midY), pod.height / 2 - 4, seed: 8, wobble: 0.8)
+                .applying(CGAffineTransform(translationX: knobX - left, y: 0))
+            ctx.fill(knob, with: .color(Jungle.paper))
+            ctx.fill(knob, with: .color(Jungle.banana.opacity(Double(on))))
+            ctx.pencil(knob, Jungle.ink, 1.8)
+            if on > 0.05 {
+                ctx.leaf(at: CGPoint(x: knobX - 5, y: pod.midY + 2), angle: -40, length: 13 * on, width: 6 * on,
+                         color: Jungle.leafDark.opacity(Double(on)))
+            }
+        }
     }
 }
 
@@ -707,8 +760,8 @@ struct Chips: View {
                 Text(options[i].name).font(Jungle.chip)
                     .foregroundColor(chosen ? Jungle.paper : Jungle.ink)
                     .padding(.horizontal, 9).frame(height: 30)
-                    .background(SketchBox(radius: 12, seed: i * 41 + options[i].name.count, fill: chosen ? Jungle.leaf : Jungle.paper,
-                                          line: chosen ? 2.4 : 1.6))
+                    .background(Lit(on: chosen, radius: 12, seed: i * 41 + options[i].name.count, wobble: 1.3))
+                    .animation(.easeOut(duration: 0.18), value: chosen)
                     .contentShape(Rectangle())
                     .onTapGesture { choose(options[i].value) }
                     .accessibilityElement(children: .ignore)
@@ -834,10 +887,12 @@ struct QuickToggle: View {
                 ctx.stroke(dot, with: .color(Jungle.ink), lineWidth: 1.2)
             }
             .frame(width: 11, height: 11)
+            .scaleEffect(isOn ? 1.2 : 1)
             Text(title).font(Jungle.chip).foregroundColor(isOn ? Jungle.paper : Jungle.ink)
         }
         .padding(.leading, 8).padding(.trailing, 11).frame(height: 28)
-        .background(SketchBox(radius: 13, seed: title.count * 29, fill: isOn ? Jungle.leaf : Jungle.paper, line: isOn ? 2.2 : 1.6, wobble: 1.2))
+        .background(Lit(on: isOn, radius: 13, seed: title.count * 29, wobble: 1.2))
+        .animation(.easeOut(duration: 0.18), value: isOn)
         .contentShape(Rectangle())
         .onTapGesture(perform: flip)
         .accessibilityElement(children: .ignore)
@@ -845,5 +900,20 @@ struct QuickToggle: View {
         .accessibilityValue(isOn ? "on" : "off")
         .accessibilityAddTraits(.isButton)
         .accessibilityAction { flip() }
+    }
+}
+
+// A sketched pebble that fades from paper to leaf green as it's turned on.
+struct Lit: View {
+    let on: Bool
+    let radius: CGFloat
+    let seed: Int
+    var wobble: CGFloat = 1.3
+
+    var body: some View {
+        ZStack {
+            SketchBox(radius: radius, seed: seed, fill: Jungle.paper, line: 1.6, wobble: wobble)
+            SketchBox(radius: radius, seed: seed, fill: Jungle.leaf, line: 2.3, wobble: wobble).opacity(on ? 1 : 0)
+        }
     }
 }
