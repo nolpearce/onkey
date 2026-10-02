@@ -104,7 +104,11 @@ namespace OnkeyDesktopPet
 
         public void ApplyAppearance()
         {
-            TopMost = app.Settings.Get("layer") != "desktop";
+            // Setting TopMost on a shown window would also activate him, stealing focus from the
+            // settings panel (which then closes), so change his layer without activating.
+            bool top = app.Settings.Get("layer") != "desktop";
+            if (!IsHandleCreated) TopMost = top;
+            else Native.SetWindowPos(Handle, new IntPtr(top ? -1 : -2), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);   // HWND_TOPMOST or HWND_NOTOPMOST, no size/move/activate.
             // Switching click-through on or off needs the window style updated in place.
             if (IsHandleCreated)
             {
