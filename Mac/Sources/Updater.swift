@@ -3,14 +3,15 @@ import CryptoKit
 
 // Checks GitHub Releases for a newer Onkey and installs it in place: downloads
 // Onkey-Mac.zip, checks it against the SHA-256 GitHub lists for it, unzips it beside the
-// running app, then quits and lets a tiny shell script swap the app and reopen it.
+// running app, then quits and lets a tiny shell script swap the app and reopen it. The
+// release notes are shown in the prompt, so nobody is sent to the website.
 // Windows/Source/Updater.cs does the same for the Windows version.
 final class Updater {
     struct Release {
         let version: String
         let download: URL
         let sha256: String?
-        let page: URL
+        let notes: String
     }
 
     static let latestURL = URL(string: "https://api.github.com/repos/nolpearce/onkey/releases/latest")!
@@ -86,33 +87,38 @@ final class Updater {
         guard let release = available else { return }
         let alert = NSAlert()
         alert.messageText = "Onkey \(release.version) is out"
-        alert.informativeText = "You have \(Self.current). Onkey will download the new version, restart, and keep all your settings."
+        var text = "You have \(Self.current). Onkey will download the new version, restart, and keep all your settings."
+        if Self.installTarget() != Bundle.main.bundleURL {
+            text += " He'll put the new version in your Applications folder."
+        }
+        if !release.notes.isEmpty { text += "\n\nWhat's new:\n" + release.notes }
+        alert.informativeText = text
         alert.addButton(withTitle: "Update and Restart")
-        alert.addButton(withTitle: "What's New")
         alert.addButton(withTitle: "Later")
         NSApp.activate(ignoringOtherApps: true)
-        switch alert.runModal() {
-        case .alertFirstButtonReturn: install(release)
-        case .alertSecondButtonReturn: NSWorkspace.shared.open(release.page)
-        default: break
-        }
+        if alert.runModal() == .alertFirstButtonReturn { install(release) }
+    }
+
+    // Where the new Onkey.app goes: over this one, unless macOS is running him from a
+    // read-only copy (App Translocation, when he's opened straight from Downloads) or his
+    // folder can't be written, in which case he moves into Applications.
+    private static func installTarget() -> URL {
+        let app = Bundle.main.bundleURL
+        let fm = FileManager.default
+        if !app.path.contains("/AppTranslocation/"), fm.isWritableFile(atPath: app.deletingLastPathComponent().path) { return app }
+        let system = URL(fileURLWithPath: "/Applications", isDirectory: true)
+        if fm.isWritableFile(atPath: system.path) { return system.appendingPathComponent("Onkey.app") }
+        let home = fm.homeDirectoryForCurrentUser.appendingPathComponent("Applications", isDirectory: true)
+        try? fm.createDirectory(at: home, withIntermediateDirectories: true)
+        return home.appendingPathComponent("Onkey.app")
     }
 
     // MARK: Installing
 
     private func install(_ release: Release) {
-        let app = Bundle.main.bundleURL
-        let folder = app.deletingLastPathComponent()
-        // An app macOS runs from a read-only copy (App Translocation), or one in a folder we
-        // can't write to, can't replace itself.
-        guard !app.path.contains("/AppTranslocation/"), FileManager.default.isWritableFile(atPath: folder.path) else {
-            let alert = NSAlert()
-            alert.messageText = "Onkey can't update himself from here"
-            alert.informativeText = "Drag Onkey.app into your Applications folder, open him from there, and try again. Or download the new version yourself."
-            alert.addButton(withTitle: "Open Download Page")
-            alert.addButton(withTitle: "Cancel")
-            NSApp.activate(ignoringOtherApps: true)
-            if alert.runModal() == .alertFirstButtonReturn { NSWorkspace.shared.open(release.page) }
+        let app = Self.installTarget()
+        guard FileManager.default.isWritableFile(atPath: app.deletingLastPathComponent().path) else {
+            say("Onkey can't update himself", "He can't write to \(app.deletingLastPathComponent().path). Drag Onkey.app into your Applications folder, open him from there, and try again.")
             return
         }
         downloading = true
@@ -146,7 +152,7 @@ final class Updater {
             }
         }
         let scratch = try FileManager.default.url(for: .itemReplacementDirectory, in: .userDomainMask,
-                                                  appropriateFor: app, create: true)
+                                                  appropriateFor: app.deletingLastPathComponent(), create: true)
         try run("/usr/bin/ditto", ["-x", "-k", zip.path, scratch.path])
         let newApp = scratch.appendingPathComponent("Onkey.app")
         guard FileManager.default.fileExists(atPath: newApp.appendingPathComponent("Contents/MacOS/Onkey").path) else {
@@ -157,13 +163,15 @@ final class Updater {
         return newApp
     }
 
-    // Quits, and once Onkey has fully exited swaps the new app into place and opens it. If
-    // the swap fails the old app is put back and reopened instead.
+    // Quits, and once Onkey has fully exited swaps the new app into place (or moves it in,
+    // when he's moving into Applications) and opens it. If the swap fails the old app is put
+    // back and reopened instead.
     private func relaunch(replacing app: URL, with newApp: URL) {
         let script = """
             while kill -0 "$1" 2>/dev/null; do sleep 0.2; done
             rm -rf "$3.old"
-            if mv "$3" "$3.old" && mv "$2" "$3"; then rm -rf "$3.old"; else [ -d "$3" ] || mv "$3.old" "$3"; fi
+            if [ ! -e "$3" ]; then mv "$2" "$3"
+            elif mv "$3" "$3.old" && mv "$2" "$3"; then rm -rf "$3.old"; else [ -d "$3" ] || mv "$3.old" "$3"; fi
             rm -rf "$(dirname "$2")"
             open "$3"
             """
@@ -184,13 +192,29 @@ final class Updater {
     private static func parse(_ data: Data) -> Release? {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let tag = json["tag_name"] as? String,
-              let page = (json["html_url"] as? String).flatMap({ URL(string: $0) }),
               let assets = json["assets"] as? [[String: Any]],
               let asset = assets.first(where: { $0["name"] as? String == assetName }),
               let download = (asset["browser_download_url"] as? String).flatMap({ URL(string: $0) }) else { return nil }
         let digest = (asset["digest"] as? String).flatMap { $0.hasPrefix("sha256:") ? String($0.dropFirst(7)) : nil }
         let version = tag.hasPrefix("v") || tag.hasPrefix("V") ? String(tag.dropFirst()) : tag
-        return Release(version: version, download: download, sha256: digest, page: page)
+        return Release(version: version, download: download, sha256: digest,
+                       notes: plainNotes(json["body"] as? String ?? ""))
+    }
+
+    // The release notes without their Markdown, short enough for an alert.
+    static func plainNotes(_ markdown: String) -> String {
+        var lines: [String] = []
+        for raw in markdown.replacingOccurrences(of: "\r", with: "").split(separator: "\n", omittingEmptySubsequences: false) {
+            var line = raw.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "**", with: "")
+            while line.hasPrefix("#") { line.removeFirst() }
+            line = line.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("- ") || line.hasPrefix("* ") { line = "• " + line.dropFirst(2) }
+            if line.isEmpty, lines.last?.isEmpty ?? true { continue }
+            lines.append(line)
+        }
+        var text = lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.count > 900 { text = String(text.prefix(900)).trimmingCharacters(in: .whitespacesAndNewlines) + "…" }
+        return text
     }
 
     // Compares dotted version numbers, so 4.10 is newer than 4.9 and 4.3 equals 4.3.0.

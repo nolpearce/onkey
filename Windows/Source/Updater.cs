@@ -23,8 +23,8 @@ namespace OnkeyDesktopPet
     // Checks GitHub Releases for a newer Onkey and installs it in place: downloads
     // Onkey-Windows.zip, checks it against the SHA-256 GitHub lists for it, unzips it, then
     // exits and lets the new Onkey.exe (run with --install, see Installer below) copy itself
-    // over this folder and start again. Mac/Sources/Updater.swift does the same for the Mac
-    // version.
+    // over this folder and start again. The release notes are shown in the prompt, so nobody
+    // is sent to the website. Mac/Sources/Updater.swift does the same for the Mac version.
     internal sealed class Updater
     {
         private const string LatestUrl = "https://api.github.com/repos/nolpearce/onkey/releases/latest";
@@ -32,7 +32,7 @@ namespace OnkeyDesktopPet
 
         public sealed class Release
         {
-            public string Version, Download, Sha256, Page;
+            public string Version, Download, Sha256, Notes;
         }
 
         // A newer release, once a check has found one.
@@ -134,13 +134,20 @@ namespace OnkeyDesktopPet
         {
             Release release = Available;
             if (release == null || Downloading) return;
-            DialogResult answer = MessageBox.Show(
-                "Onkey " + release.Version + " is out (you have " + Program.Version + ").\n\n" +
-                "Update now? Onkey will download it, restart, and keep all your settings.\n\n" +
-                "Choose No to see what's new first.",
-                "Update Onkey", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
-            if (answer == DialogResult.Yes) Install(release);
-            else if (answer == DialogResult.No) Open(release.Page);
+            string text = "Onkey " + release.Version + " is out (you have " + Program.Version + ").\n\n" +
+                "Update now? Onkey will download it, restart, and keep all your settings.";
+            if (InstallFolder() != appFolder) text += " He'll move into " + InstallFolder() + ", since he can't write to this folder.";
+            if (release.Notes.Length > 0) text += "\n\nWhat's new:\n" + release.Notes;
+            if (MessageBox.Show(text, "Update Onkey", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+                Install(release);
+        }
+
+        // Where the new files go: over this folder, or into the user's own programs folder when
+        // this one can't be written (for example if he was put in Program Files).
+        private string InstallFolder()
+        {
+            if (CanWrite(appFolder)) return appFolder;
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), Path.Combine("Programs", "Onkey"));
         }
 
         // Installing
@@ -154,10 +161,11 @@ namespace OnkeyDesktopPet
                 MessageBox.Show("This Onkey runs from a copy of the code, so update it with \"git pull\" instead.", "Onkey");
                 return;
             }
-            if (!CanWrite(appFolder))
+            string target = InstallFolder();
+            try { Directory.CreateDirectory(target); } catch { }
+            if (!CanWrite(target))
             {
-                if (MessageBox.Show("Onkey can't write to " + appFolder + ", so he can't update himself there.\n\nOpen the download page instead?",
-                                    "Onkey", MessageBoxButtons.YesNo) == DialogResult.Yes) Open(release.Page);
+                MessageBox.Show("Onkey can't write to " + target + ", so he can't update himself.", "Onkey");
                 return;
             }
             Downloading = true;
@@ -172,7 +180,7 @@ namespace OnkeyDesktopPet
                     Downloading = false;
                     if (Changed != null) Changed();
                     if (error != null) MessageBox.Show("Onkey couldn't update: " + error, "Onkey");
-                    else Relaunch(unpacked);
+                    else Relaunch(unpacked, target);
                 }, null);
             });
         }
@@ -206,11 +214,13 @@ namespace OnkeyDesktopPet
         }
 
         // Starts the new Onkey.exe in install mode and exits; it waits for this Onkey to
-        // close, copies the new files over this folder and starts Onkey again.
-        private void Relaunch(string files)
+        // close, copies the new files into the target folder and starts Onkey again. When he
+        // moves, "Open at startup" follows him.
+        private void Relaunch(string files, string target)
         {
+            if (target != appFolder) MoveLoginEntry(Path.Combine(target, "Onkey.exe"));
             ProcessStartInfo start = new ProcessStartInfo(Path.Combine(files, "Onkey.exe"),
-                "--install " + Process.GetCurrentProcess().Id + " " + Arg(files) + " " + Arg(appFolder));
+                "--install " + Process.GetCurrentProcess().Id + " " + Arg(files) + " " + Arg(target));
             start.UseShellExecute = false;
             start.WorkingDirectory = files;
             try { Process.Start(start); }
@@ -241,7 +251,9 @@ namespace OnkeyDesktopPet
             Release release = new Release();
             release.Version = tag.Groups[1].Value.TrimStart('v', 'V');
             release.Download = download.Groups[1].Value;
-            release.Page = "https://github.com/nolpearce/onkey/releases/tag/" + Uri.EscapeDataString(tag.Groups[1].Value);
+            Match body = Regex.Match(json, "\"body\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
+            release.Notes = "";
+            try { if (body.Success) release.Notes = PlainNotes(Regex.Unescape(body.Groups[1].Value)); } catch (ArgumentException) { }
             // Each asset lists its name before its digest, so a digest belongs to the
             // nearest name before it.
             string lastName = null;
@@ -288,9 +300,34 @@ namespace OnkeyDesktopPet
         // trailing backslash would escape the closing quote, so it's dropped.
         private static string Arg(string s) { return "\"" + s.TrimEnd('\\') + "\""; }
 
-        private static void Open(string url)
+        // The release notes without their Markdown, short enough for a message box.
+        private static string PlainNotes(string markdown)
         {
-            try { Process.Start(url); } catch { /* No browser; nothing more to do. */ }
+            List<string> lines = new List<string>();
+            foreach (string raw in markdown.Replace("\r", "").Split('\n'))
+            {
+                string line = raw.Trim().Replace("**", "").TrimStart('#').Trim();
+                if (line.StartsWith("- ") || line.StartsWith("* ")) line = "\u2022 " + line.Substring(2);
+                if (line.Length == 0 && (lines.Count == 0 || lines[lines.Count - 1].Length == 0)) continue;
+                lines.Add(line);
+            }
+            string text = string.Join("\n", lines.ToArray()).Trim();
+            if (text.Length > 900) text = text.Substring(0, 900).Trim() + "\u2026";
+            return text;
+        }
+
+        private void MoveLoginEntry(string exe)
+        {
+            try
+            {
+                using (RegistryKey run = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", true))
+                {
+                    string value = run == null ? null : run.GetValue("Onkey") as string;
+                    if (value != null && value.IndexOf(appFolder.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase) >= 0)
+                        run.SetValue("Onkey", "\"" + exe + "\"");
+                }
+            }
+            catch { /* He still runs; "Open at startup" can be turned on again. */ }
         }
     }
 
