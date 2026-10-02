@@ -30,15 +30,16 @@ More detail is in [Mac/README.txt](Mac/README.txt).
 
 ## Windows
 
-Download `Onkey-Windows.zip` from [Releases](https://github.com/nolpearce/onkey/releases) and extract it, or clone this repo, then double-click `Start Onkey.vbs` (in `Windows\` in the repo). Then click Onkey's icon beside the clock for the same settings panel as the Mac version. See [Windows/README.txt](Windows/README.txt).
+Download `Onkey-Windows.zip` from [Releases](https://github.com/nolpearce/onkey/releases), extract it and double-click `Onkey.exe`. The first time, Windows may say it protected your PC because Onkey isn't from a known publisher: click **More info**, then **Run anyway**. Then click Onkey's icon beside the clock for the same settings panel as the Mac version. To run it from this repo instead, run `Windows\build.cmd` and start `Windows\Onkey.exe`. See [Windows/README.txt](Windows/README.txt).
 
 ## Layout
 
 ```
 Assets/      Onkey.png (the sprite both versions draw from), Sounds/, Preview.gif
 Mac/         Sources/*.swift, build.sh (builds and installs Onkey.app), README.txt
-Windows/     Source/*.cs, Start Onkey.vbs / .ps1 (compile and run at launch), README.txt
-package.sh   builds both release downloads into dist/
+Windows/     Source/*.cs, build.cmd (builds Onkey.exe), Onkey.ico, README.txt
+package.sh   builds the Mac release download into dist/
+.github/     windows-release.yml builds and attaches the Windows download
 ```
 
 The two versions mirror each other file for file where they can (for example
@@ -52,6 +53,7 @@ files below, the tag (`v4.5.0`) and the release title (`Onkey 4.5.0: ...`).
 
 Bump the version in `Mac/build.sh` (`CFBundleShortVersionString`, and `CFBundleVersion`),
 `Windows/Source/Program.cs` (`Version`) and both README.txt files, run `./package.sh`, then
-publish a GitHub release tagged `vX.Y.Z` with `Onkey-Mac.zip` and `Onkey-Windows.zip` attached
-under exactly those names. Running Onkeys compare their version with the latest release's tag
+publish a GitHub release tagged `vX.Y.Z` with `Onkey-Mac.zip` attached. Publishing it starts
+the Windows release workflow, which builds `Onkey.exe` and attaches `Onkey-Windows.zip`; both
+names must stay exactly as they are. Running Onkeys compare their version with the latest release's tag
 and offer the update from the menu.

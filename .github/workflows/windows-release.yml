@@ -1,0 +1,69 @@
+# Builds Onkey-Windows.zip on Windows and attaches it to the release, so the Windows
+# download is always a freshly built Onkey.exe. Runs when a release is published, or by
+# hand for an existing tag (Actions > Windows release > Run workflow).
+name: Windows release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag, for example v4.5.0
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Check the version matches the tag
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path Windows/Source/Program.cs -Pattern 'Version = "(.*)";').Matches[0].Groups[1].Value
+          if ($version -notmatch '^\d+\.\d+\.\d+$' -or "v$version" -ne $env:TAG) {
+            throw "Program.cs has version '$version' but the release tag is '$env:TAG'."
+          }
+
+      - name: Build Onkey.exe
+        shell: cmd
+        run: Windows\build.cmd
+
+      - name: Make Onkey-Windows.zip
+        shell: pwsh
+        run: |
+          $out = 'dist/Onkey-Windows'
+          New-Item -ItemType Directory -Force "$out/Assets/Sounds", "$out/Source" | Out-Null
+          Copy-Item Windows/Onkey.exe, Windows/README.txt $out
+          Copy-Item Assets/Onkey.png "$out/Assets"
+          Copy-Item Assets/Sounds/oooo.wav, Assets/Sounds/README.txt "$out/Assets/Sounds"
+          # Onkey 4.4.3 and older only install an update that has Start Onkey.vbs and
+          # Source\*.cs, and start it with wscript, so the zip keeps both. The .vbs just
+          # starts Onkey.exe.
+          Copy-Item Windows/Source/*.cs "$out/Source"
+          $shim = @(
+            "' Onkey now starts from Onkey.exe. This file lets older Onkeys update to it.",
+            'Set shell = CreateObject("WScript.Shell")',
+            'folder = CreateObject("Scripting.FileSystemObject").GetParentFolderName(WScript.ScriptFullName)',
+            'shell.Run Chr(34) & folder & "\Onkey.exe" & Chr(34), 1, False'
+          )
+          Set-Content -Path "$out/Start Onkey.vbs" -Value $shim -Encoding ascii
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          [System.IO.Compression.ZipFile]::CreateFromDirectory((Resolve-Path $out), "$PWD/dist/Onkey-Windows.zip", 'Optimal', $true)
+          $zip = [System.IO.Compression.ZipFile]::OpenRead("$PWD/dist/Onkey-Windows.zip")
+          $zip.Entries | ForEach-Object { $_.FullName }
+          $zip.Dispose()
+
+      - name: Attach to the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload $env:TAG dist/Onkey-Windows.zip --clobber --repo ${{ github.repository }}
