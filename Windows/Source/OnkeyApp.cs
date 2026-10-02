@@ -41,8 +41,11 @@ namespace OnkeyDesktopPet
         private readonly string assetFolder, appFolder;
         private readonly List<PetForm> pets = new List<PetForm>();
         private readonly List<ToolStripMenuItem> optionItems = new List<ToolStripMenuItem>();
-        private readonly List<ToolStripMenuItem> soundOptionItems = new List<ToolStripMenuItem>();
-        private ToolStripMenuItem pauseItem, loginItem, updateItem;
+        private ToolStripMenuItem pauseItem, updateItem;
+        private SettingsPanel panel;
+        private DateTime panelClosed = DateTime.MinValue;
+        // Fired whenever a setting or the update state changes, so an open Settings window can follow.
+        public event Action SettingsChanged;
         // Finds and installs new releases from GitHub.
         private readonly Updater updater;
         private float dpi = 1;
@@ -157,119 +160,56 @@ namespace OnkeyDesktopPet
 
         private Icon MakeTrayIcon()
         {
-            using (Bitmap face = Renderer.Render(0, false, 1, false))
-            using (Bitmap icon = new Bitmap(32, 32, PixelFormat.Format32bppPArgb))
+            using (Bitmap icon = RenderHead(32)) return Icon.FromHandle(icon.GetHicon());
+        }
+
+        // Onkey's head, cropped from the top of his opaque area, on a square of the given size.
+        public Bitmap RenderHead(int size)
+        {
+            using (Bitmap face = Renderer.Render(0, false, Math.Max(1, size / 32f), false))
             {
-                RectangleF b = OnkeyRenderer.OpaqueBounds(face, 1);
-                // Crop to the head (the top of the opaque area) so he's recognisable at 16px.
+                Bitmap icon = new Bitmap(size, size, PixelFormat.Format32bppPArgb);
+                RectangleF b = OnkeyRenderer.OpaqueBounds(face, 1);   // In pixels.
+                // Crop to the head so he's recognisable at 16px.
                 RectangleF headArea = new RectangleF(b.X + b.Width * 0.22f, b.Y, b.Width * 0.56f, b.Height * 0.72f);
                 using (Graphics g = Graphics.FromImage(icon))
                 {
                     g.Clear(Color.Transparent);
                     g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                    float scale = Math.Min(32 / headArea.Width, 32 / headArea.Height);
+                    float scale = Math.Min(size / headArea.Width, size / headArea.Height);
                     float w = headArea.Width * scale, h = headArea.Height * scale;
-                    g.DrawImage(face, new RectangleF((32 - w) / 2, (32 - h) / 2, w, h), headArea, GraphicsUnit.Pixel);
+                    g.DrawImage(face, new RectangleF((size - w) / 2, (size - h) / 2, w, h), headArea, GraphicsUnit.Pixel);
                 }
-                return Icon.FromHandle(icon.GetHicon());
+                return icon;
             }
         }
 
-        // Menu
-
+        // The tray menu keeps only the quick actions; everything else is in the Settings window.
         private void BuildMenu()
         {
             ContextMenuStrip menu = new ContextMenuStrip();
             pauseItem = Item("Pause Onkey", delegate { TogglePause(); });
             menu.Items.Add(pauseItem);
-            menu.Items.Add(Option("Dance to music", "dance", "true"));
+            menu.Items.Add(Option("Dance to music", "dance"));
+            menu.Items.Add(Option("Let me drag Onkey around", "draggable"));
             menu.Items.Add(new ToolStripSeparator());
-
-            menu.Items.Add(Submenu("How many Onkeys",
-                Option("One", "count", "1"),
-                Option("Two", "count", "2"),
-                Option("Three", "count", "3"),
-                Option("Five", "count", "5"),
-                Option("Ten (chaos)", "count", "10")));
-
-            menu.Items.Add(Submenu("Where Onkey goes",
-                Option("Anywhere on the screen", "zone", "anywhere"),
-                Option("Along the bottom", "zone", "bottom"),
-                Option("Along the top", "zone", "top"),
-                Option("Up and down the left side", "zone", "left"),
-                Option("Up and down the right side", "zone", "right"),
-                Option("Stay in one spot", "zone", "stay"),
-                new ToolStripSeparator(),
-                Header("Walks toward my mouse"),
-                Option("Never", "chase", "0"),
-                Option("Sometimes", "chase", "5"),
-                Option("Often", "chase", "2"),
-                Option("Always", "chase", "1"),
-                new ToolStripSeparator(),
-                Header("Walking speed"),
-                Option("Slow", "speed", "22"),
-                Option("Normal", "speed", "42"),
-                Option("Fast", "speed", "80"),
-                Option("Zoomies", "speed", "160"),
-                new ToolStripSeparator(),
-                Item("Bring Onkey to this screen", delegate { BringHere(); })));
-
-            ToolStripMenuItem playNow = Item("Play sound now", delegate { PlayNow(); });
-            ToolStripItem[] soundOptions = {
-                Header("How often"),
-                Option("Every 20-40 seconds", "soundGap", "20"),
-                Option("Every 1½-3 minutes", "soundGap", "90"),
-                Option("Every 5-10 minutes", "soundGap", "300"),
-                new ToolStripSeparator(),
-                Header("Volume"),
-                Option("Quiet", "volume", "0.25"),
-                Option("Medium", "volume", "0.6"),
-                Option("Loud", "volume", "1") };
-            foreach (ToolStripItem i in soundOptions) { ToolStripMenuItem m = i as ToolStripMenuItem; if (m != null && m.Tag != null) soundOptionItems.Add(m); }
-            soundOptionItems.Add(playNow);
-            List<ToolStripItem> soundMenu = new List<ToolStripItem>();
-            soundMenu.Add(Option(Sound == null ? "Sound clip not installed" : "Sound on", "soundOn", "true"));
-            soundMenu.Add(new ToolStripSeparator());
-            soundMenu.AddRange(soundOptions);
-            soundMenu.Add(new ToolStripSeparator());
-            soundMenu.Add(playNow);
-            menu.Items.Add(Submenu("Sound", soundMenu.ToArray()));
-
-            menu.Items.Add(Submenu("Appearance",
-                Header("Size"),
-                Option("Tiny", "size", "0.5"),
-                Option("Small", "size", "0.75"),
-                Option("Normal", "size", "1"),
-                Option("Large", "size", "1.5"),
-                Option("Huge", "size", "2.25"),
-                new ToolStripSeparator(),
-                Header("Opacity"),
-                Option("Solid", "opacity", "1"),
-                Option("See-through", "opacity", "0.7"),
-                Option("Ghost", "opacity", "0.35"),
-                new ToolStripSeparator(),
-                Header("Layer"),
-                Option("In front of all windows", "layer", "above"),
-                Option("On the desktop, behind windows", "layer", "desktop"),
-                Option("Stay in front of full-screen apps", "overFullScreen", "true"),
-                new ToolStripSeparator(),
-                Header("Eyes"),
-                Option("Watch my cursor", "watchCursor", "true"),
-                Option("Blink now and then", "blink", "true")));
-
-            menu.Items.Add(Option("Let me drag Onkey around", "draggable", "true"));
-            menu.Items.Add(new ToolStripSeparator());
-            updateItem = Item("Check for updates...", delegate { updater.MenuChosen(); });
+            // Only shown while there's an update to install.
+            updateItem = Item("Update Onkey...", delegate { updater.MenuChosen(); });
             menu.Items.Add(updateItem);
-            menu.Items.Add(Option("Check for updates automatically", "checkUpdates", "true"));
-            loginItem = Item("Open Onkey when Windows starts", delegate { ToggleLogin(); });
-            menu.Items.Add(loginItem);
+            ToolStripMenuItem settingsItem = Item("Settings...", delegate { ShowSettings(Cursor.Position); });
+            settingsItem.Font = new Font(settingsItem.Font, FontStyle.Bold);
+            menu.Items.Add(settingsItem);
             menu.Items.Add(Item("Exit Onkey", delegate { Exit(); }));
 
             tray.Icon = MakeTrayIcon();
-            tray.Text = "Onkey - right-click for settings";
+            tray.Text = "Onkey - click for settings";
             tray.ContextMenuStrip = menu;
-            tray.DoubleClick += delegate { TogglePause(); };
+            tray.MouseClick += delegate(object sender, MouseEventArgs e)
+            {
+                // Clicking the icon while the panel is open closes it (it closes itself as the
+                // click lands), so don't open it straight back up.
+                if (e.Button == MouseButtons.Left && (DateTime.Now - panelClosed).TotalMilliseconds > 300) ShowSettings(Cursor.Position);
+            };
             RefreshMenu();
         }
 
@@ -280,40 +220,31 @@ namespace OnkeyDesktopPet
             return item;
         }
 
-        private static ToolStripMenuItem Header(string text)
+        // An on/off setting.
+        private ToolStripMenuItem Option(string text, string key)
         {
             ToolStripMenuItem item = new ToolStripMenuItem(text);
-            item.Enabled = false;
-            return item;
-        }
-
-        private static ToolStripMenuItem Submenu(string text, params ToolStripItem[] items)
-        {
-            ToolStripMenuItem parent = new ToolStripMenuItem(text);
-            parent.DropDownItems.AddRange(items);
-            // Keep the menu open while picking options, like a settings panel.
-            parent.DropDown.Closing += delegate(object s, ToolStripDropDownClosingEventArgs e)
-            {
-                if (e.CloseReason == ToolStripDropDownCloseReason.ItemClicked) e.Cancel = true;
-            };
-            return parent;
-        }
-
-        // A setting choice. "true" options toggle; others act as radio buttons.
-        private ToolStripMenuItem Option(string text, string key, string value)
-        {
-            ToolStripMenuItem item = new ToolStripMenuItem(text);
-            item.Tag = new string[] { key, value };
-            item.Click += delegate { Choose(key, value); };
+            item.Tag = key;
+            item.Click += delegate { Change(key, Settings.Bool(key) ? "false" : "true"); };
             optionItems.Add(item);
             return item;
         }
 
-        private void Choose(string key, string value)
+        // Pops the settings panel up beside the tray icon.
+        public void ShowSettings(Point near)
         {
+            if (panel != null) { if (!panel.FadingOut) panel.Activate(); return; }
+            panel = new SettingsPanel(this, updater);
+            panel.FormClosed += delegate { panel = null; panelClosed = DateTime.Now; };
+            panel.ShowNear(near);
+        }
+
+        // Stores a setting and puts it into effect straight away.
+        public void Change(string key, string value)
+        {
+            if (Settings.Get(key) == value) return;
             int oldWidth = CanvasPixelsWide, oldHeight = CanvasPixelsHigh;
-            if (value == "true") Settings.Set(key, Settings.Bool(key) ? "false" : "true");
-            else Settings.Set(key, value);
+            Settings.Set(key, value);
             switch (key)
             {
                 case "count":
@@ -329,7 +260,7 @@ namespace OnkeyDesktopPet
                 case "watchCursor":
                     RenderFrames();
                     break;
-                case "opacity": case "layer": case "draggable":
+                case "opacity": case "layer": case "draggable": case "overFullScreen":
                     foreach (PetForm pet in pets) pet.ApplyAppearance();
                     break;
                 case "zone": case "chase":
@@ -349,30 +280,21 @@ namespace OnkeyDesktopPet
             foreach (PetForm pet in pets) pet.Present();
         }
 
+        public void Change(string key, double value) { Change(key, value.ToString("R", CultureInfo.InvariantCulture)); }
+
         private void RefreshMenu()
         {
-            foreach (ToolStripMenuItem item in optionItems)
-            {
-                string[] tag = (string[])item.Tag;
-                item.Checked = tag[1] == "true" ? Settings.Bool(tag[0]) : Settings.Get(tag[0]) == tag[1];
-            }
-            bool soundOn = Sound != null && Settings.Bool("soundOn");
-            foreach (ToolStripMenuItem item in soundOptionItems) item.Enabled = soundOn;
+            foreach (ToolStripMenuItem item in optionItems) item.Checked = Settings.Bool((string)item.Tag);
             if (updater != null)
             {
                 Updater.Release release = updater.Available;
-                updateItem.Text = release == null ? "Check for updates..."
-                    : updater.Downloading ? "Downloading Onkey " + release.Version + "..."
-                    : "Update to Onkey " + release.Version + "...";
+                updateItem.Visible = release != null;
+                if (release != null) updateItem.Text = updater.Downloading ? "Downloading Onkey " + release.Version + "..." : "Update to Onkey " + release.Version + "...";
                 updateItem.Enabled = !updater.Downloading;
-                tray.Text = release == null ? "Onkey - right-click for settings" : "Onkey - version " + release.Version + " is available";
+                tray.Text = release == null ? "Onkey - click for settings" : "Onkey - version " + release.Version + " is available";
             }
-            try
-            {
-                using (RegistryKey run = Registry.CurrentUser.OpenSubKey(RunKey))
-                    loginItem.Checked = run != null && run.GetValue("Onkey") != null;
-            }
-            catch { loginItem.Enabled = false; }
+            else updateItem.Visible = false;
+            if (SettingsChanged != null) SettingsChanged();
         }
 
         // Ticking
@@ -387,7 +309,7 @@ namespace OnkeyDesktopPet
             // Windows doesn't keep him where he was put: a newly opened window (a browser's new
             // tab or window, say) can land above him even while he's topmost. Putting him back
             // in his layer now and then is enough to undo that (but not over the open tray menu).
-            bool restack = ++tickCount % 15 == 0 && !tray.ContextMenuStrip.Visible;
+            bool restack = ++tickCount % 15 == 0 && !tray.ContextMenuStrip.Visible && panel == null;
             bool desktop = Settings.Get("layer") == "desktop";
             foreach (PetForm pet in pets.ToArray())
             {
@@ -480,20 +402,23 @@ namespace OnkeyDesktopPet
 
         // Actions
 
-        private void TogglePause()
+        public void TogglePause()
         {
             Paused = !Paused;
             pauseItem.Text = Paused ? "Resume Onkey" : "Pause Onkey";
             if (Paused) { StopSound(); foreach (PetForm pet in pets) pet.ShowIdle(); }
+            if (SettingsChanged != null) SettingsChanged();
         }
 
-        private void PlayNow()
+        public bool HasSound { get { return Sound != null; } }
+
+        public void PlayNow()
         {
             if (pets.Count > 0) Speak(pets[Random.Next(pets.Count)], true);
         }
 
         // Gathers every Onkey onto the screen under the mouse, loosely around the middle.
-        private void BringHere()
+        public void BringHere()
         {
             Rectangle area = Screen.FromPoint(Cursor.Position).WorkingArea;
             for (int i = 0; i < pets.Count; i++)
@@ -506,7 +431,20 @@ namespace OnkeyDesktopPet
             SavePosition();
         }
 
-        private void ToggleLogin()
+        public bool OpensAtLogin
+        {
+            get
+            {
+                try
+                {
+                    using (RegistryKey run = Registry.CurrentUser.OpenSubKey(RunKey))
+                        return run != null && run.GetValue("Onkey") != null;
+                }
+                catch { return false; }
+            }
+        }
+
+        public void ToggleLogin()
         {
             try
             {
@@ -523,11 +461,12 @@ namespace OnkeyDesktopPet
             RefreshMenu();
         }
 
-        private void Exit()
+        public void Exit()
         {
             if (exiting) return;
             exiting = true;
             SavePosition();
+            if (panel != null) panel.Close();
             SystemEvents.DisplaySettingsChanged -= OnDisplayChanged;
             timer.Stop(); timer.Dispose();
             foreach (PetForm pet in pets.ToArray()) pet.Close();

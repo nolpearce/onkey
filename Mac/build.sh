@@ -15,7 +15,7 @@ mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 
 echo "Compiling for Apple silicon and Intel..."
 for arch in arm64 x86_64; do
-    swiftc -O -target "$arch-apple-macos13.0" -o "$work/Onkey-$arch" "$here"/Sources/*.swift -framework AppKit -framework AVFoundation -framework CoreAudio
+    swiftc -O -target "$arch-apple-macos13.0" -o "$work/Onkey-$arch" "$here"/Sources/*.swift -framework AppKit -framework AVFoundation -framework CoreAudio -framework SwiftUI
 done
 lipo -create "$work/Onkey-arm64" "$work/Onkey-x86_64" -output "$app/Contents/MacOS/Onkey"
 mkdir -p "$app/Contents/Resources/Sounds"
