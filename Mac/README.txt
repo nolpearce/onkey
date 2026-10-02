@@ -21,10 +21,12 @@ close it.
   Look            size, how see-through he is, in front of windows or on
                   the desktop behind them, whether he stays over full-screen
                   apps, eyes that watch your cursor, and blinking
-  Updates         Check for updates: when there's a newer Onkey, choose
-                  Update and Onkey downloads it, replaces Onkey.app, and
-                  reopens with your settings kept. Onkey.app needs to be in
-                  a folder you can write to, like Applications. After an
+  Updates         Opening this tab looks for a newer Onkey right there.
+                  When there is one, it shows what's new; choose "Update and
+                  restart" and Onkey downloads it (you see the progress),
+                  replaces Onkey.app, and reopens with your settings kept.
+                  If he was opened straight from Downloads, he moves into
+                  Applications as he updates. After an
                   update macOS may ask again whether he can listen to your
                   music. Check by himself: once shortly after launch and
                   then every six hours; turn it off to keep Onkey offline.

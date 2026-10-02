@@ -255,17 +255,7 @@ namespace OnkeyDesktopPet
             Inline(look, "Blink", Switch("blink"), delegate { return "now and then"; });
 
             Page updates = AddPage("Updates");
-            Full(updates, new Note(delegate
-            {
-                Updater.Release release = updater.Available;
-                if (release == null) return "You have Onkey " + Program.Version + ".";
-                return updater.Downloading ? "Downloading Onkey " + release.Version + "..."
-                    : "Onkey " + release.Version + " is out!";
-            }));
-            SketchButton check = new SketchButton("Check for updates", delegate { updater.MenuChosen(); });
-            check.Text = delegate { return updater.Available == null ? "Check for updates" : "Update to Onkey " + updater.Available.Version; };
-            check.Enabled = delegate { return !updater.Downloading; };
-            Full(updates, check);
+            Full(updates, new UpdateCard(updater, head));
             Inline(updates, "Check by himself", Switch("checkUpdates"), delegate { return "looks every few hours"; });
             Inline(updates, "Open at startup", new Toggle(delegate { return app.OpensAtLogin; }, delegate(bool on) { app.ToggleLogin(); }),
                 delegate { return "when Windows starts"; });
@@ -466,6 +456,15 @@ namespace OnkeyDesktopPet
             SizeF size = g.MeasureString(page.Name, TabFont);
             Jungle.Text(g, page.Name, TabFont, selected ? Jungle.Ink : Jungle.Paper,
                 new PointF(r.Left + (r.Width - size.Width) / 2, r.Top + (r.Height - size.Height) / 2 + (selected ? -1 : 0)));
+            if (pages.IndexOf(page) == UpdatesPage && updater.Available != null)
+            {
+                // A banana on the Updates tab while there's a new Onkey to get.
+                using (GraphicsPath dot = Sketch.Circle(new PointF(r.Right - 5, r.Top + 3), 5f, 5, 0.5f))
+                {
+                    using (Brush b = new SolidBrush(Jungle.Banana)) g.FillPath(b, dot);
+                    using (Pen ink = new Pen(Jungle.Ink, 1.2f)) g.DrawPath(ink, dot);
+                }
+            }
         }
 
         // Mouse and keys
@@ -528,12 +527,26 @@ namespace OnkeyDesktopPet
             else if (e.Control && e.KeyCode == Keys.Tab) SelectPage((current + (e.Shift ? pages.Count - 1 : 1)) % pages.Count);
         }
 
+        protected override void OnMouseWheel(MouseEventArgs e)
+        {
+            base.OnMouseWheel(e);
+            PointF p = Logical(e);
+            foreach (Widget w in pages[current].Widgets)
+                if (w.Wheel(p, e.Delta)) { Invalidate(); return; }
+        }
+
         private void SelectPage(int index)
         {
             current = index;
             hovered = null;
+            if (index == UpdatesPage) updater.CheckIfStale();
             Invalidate();
         }
+
+        private const int UpdatesPage = 3;
+
+        // Opens the Updates tab, where the whole update happens.
+        public void ShowUpdates() { SelectPage(UpdatesPage); }
     }
 
     internal static class Jungle
@@ -781,6 +794,8 @@ namespace OnkeyDesktopPet
         public virtual void Up(PointF p) { }
         // Moves any animation on by dt seconds; true while it still needs redrawing.
         public virtual bool Animate(double dt) { return false; }
+        // The mouse wheel turned over the page; true if this widget used it.
+        public virtual bool Wheel(PointF p, int delta) { return false; }
 
         // Eases `shown` toward 0 or 1 (about 0.15 s for the whole way); true while it's moving.
         protected static bool Ease(ref float shown, bool on, double dt)
@@ -1084,6 +1099,215 @@ namespace OnkeyDesktopPet
         {
             down = false;
             if (HitArea().Contains(p)) click();
+        }
+    }
+
+    // The whole update, in one sketched box: looking for a new Onkey, what's new in it, the
+    // download growing along a vine, and restarting. Each step fades in over the last.
+    internal sealed class UpdateCard : Widget
+    {
+        private static readonly Color Fill = Color.FromArgb(234, 222, 191);
+        private readonly Updater updater;
+        private readonly Bitmap head;
+        private readonly SketchButton checkAgain, update, tryAgain;
+        private SketchButton button, pressedButton;   // The button showing now, and the one held down.
+        private Updater.Phase shownPhase = (Updater.Phase)(-1);
+        private float appear = 1, scroll, notesHeight, progress;
+        private double time;
+        private RectangleF notesArea;
+        private bool hovering;
+
+        public UpdateCard(Updater updater, Bitmap head)
+        {
+            this.updater = updater;
+            this.head = head;
+            checkAgain = new SketchButton("Check again", delegate { updater.Check(); });
+            checkAgain.Small = true;
+            tryAgain = new SketchButton("Try again", delegate { updater.Check(); });
+            tryAgain.Small = true;
+            update = new SketchButton("Update and restart", delegate { updater.Install(); });
+        }
+
+        public override float Measure(float width) { return 236; }
+
+        public override bool Animate(double dt)
+        {
+            time += dt;
+            bool moving = false;
+            if (updater.State != shownPhase) { shownPhase = updater.State; appear = 0; scroll = 0; progress = 0; }
+            if (appear < 1) { appear = Math.Min(1, appear + (float)(dt / 0.25)); moving = true; }
+            float target = (float)updater.Progress;
+            if (Math.Abs(progress - target) > 0.002f) { progress += (target - progress) * (float)Math.Min(1, dt * 10); moving = true; }
+            Updater.Phase p = updater.State;
+            return moving || p == Updater.Phase.Idle || p == Updater.Phase.Checking || p == Updater.Phase.Restarting;
+        }
+
+        public override RectangleF HitArea() { return button == null ? RectangleF.Empty : button.HitArea(); }
+        public override void Down(PointF p) { pressedButton = button; if (button != null) button.Down(p); }
+        public override void Up(PointF p) { if (pressedButton != null) pressedButton.Up(p); pressedButton = null; }
+
+        public override bool Wheel(PointF p, int delta)
+        {
+            if (updater.State != Updater.Phase.Available || !notesArea.Contains(p)) return false;
+            scroll = Math.Max(0, Math.Min(Math.Max(0, notesHeight - notesArea.Height), scroll - delta / 120f * 30));
+            return true;
+        }
+
+        public override void Paint(Graphics g, bool enabled, bool hover)
+        {
+            RectangleF r = Bounds;
+            using (GraphicsPath box = Sketch.Box(r, 12, 21, 1.2f))
+            {
+                using (Brush b = new SolidBrush(Fill)) g.FillPath(b, box);
+                Sketch.Stroke(g, box, Jungle.Ink, 1.6f);
+            }
+            hovering = hover;
+            button = null;
+            string version = updater.Available != null ? updater.Available.Version : "";
+            float mid = r.Top + r.Height / 2;
+            switch (updater.State)
+            {
+                case Updater.Phase.Idle:
+                case Updater.Phase.Checking:
+                    Coconuts(g, new PointF(r.Left + r.Width / 2, mid - 22));
+                    Centered(g, "Looking for a new Onkey...", Form.LabelFont, Jungle.Ink, mid + 18);
+                    Centered(g, "You have Onkey " + Program.Version + ".", Form.SmallFont, Jungle.Faded, mid + 44);
+                    break;
+                case Updater.Phase.UpToDate:
+                    g.DrawImage(head, new RectangleF(r.Left + r.Width / 2 - 26, mid - 84, 52, 52));
+                    Centered(g, "You're up to date!", Form.LabelFont, Jungle.Ink, mid - 22);
+                    Centered(g, "Onkey " + Program.Version + " is the newest one.", Form.SmallFont, Jungle.Faded, mid + 4);
+                    Place(g, checkAgain, mid + 32);
+                    break;
+                case Updater.Phase.Available:
+                    Jungle.Text(g, "Onkey " + version + " is out!", Form.LabelFont, Jungle.Ink, new PointF(r.Left + 14, r.Top + 12));
+                    string have = "you have " + Program.Version;
+                    SizeF haveSize = g.MeasureString(have, Form.SmallFont);
+                    Jungle.Text(g, have, Form.SmallFont, Jungle.Faded, new PointF(r.Right - 14 - haveSize.Width, r.Top + 16));
+                    Notes(g, RectangleF.FromLTRB(r.Left + 14, r.Top + 42, r.Right - 14, r.Bottom - 58));
+                    Place(g, update, r.Bottom - 50);
+                    break;
+                case Updater.Phase.Downloading:
+                    Centered(g, "Downloading Onkey " + version + "...", Form.LabelFont, Jungle.Ink, mid - 50);
+                    Vine(g, RectangleF.FromLTRB(r.Left + 20, mid - 17, r.Right - 20, mid + 17), progress);
+                    Centered(g, Math.Round(progress * 100) + "%", Form.SmallFont, Jungle.Faded, mid + 24);
+                    break;
+                case Updater.Phase.Restarting:
+                    Coconuts(g, new PointF(r.Left + r.Width / 2, mid - 22));
+                    Centered(g, "Restarting with Onkey " + version + "...", Form.LabelFont, Jungle.Ink, mid + 18);
+                    Centered(g, "Your settings come with him.", Form.SmallFont, Jungle.Faded, mid + 44);
+                    break;
+                case Updater.Phase.Failed:
+                    Centered(g, "Hmm, that didn't work", Form.LabelFont, Jungle.Ink, r.Top + 40);
+                    using (StringFormat centre = new StringFormat())
+                    using (Brush faded = new SolidBrush(Jungle.Faded))
+                    {
+                        centre.Alignment = StringAlignment.Center;
+                        g.DrawString(updater.Problem, Form.SmallFont, faded, RectangleF.FromLTRB(r.Left + 18, r.Top + 72, r.Right - 18, r.Top + 126), centre);
+                    }
+                    Place(g, tryAgain, r.Top + 132);
+                    break;
+            }
+            if (appear < 1)
+            {
+                // Fade the new step in by laying the card's colour over it and lifting it away.
+                using (Brush veil = new SolidBrush(Color.FromArgb((int)((1 - appear) * 255), Fill)))
+                    g.FillRectangle(veil, RectangleF.Inflate(r, -4, -4));
+            }
+        }
+
+        private void Centered(Graphics g, string text, Font font, Color color, float top)
+        {
+            SizeF size = g.MeasureString(text, font);
+            Jungle.Text(g, text, font, color, new PointF(Bounds.Left + (Bounds.Width - size.Width) / 2, top));
+        }
+
+        // Shows a button centred across the card.
+        private void Place(Graphics g, SketchButton b, float top)
+        {
+            b.Form = Form;
+            b.Bounds = new RectangleF(Bounds.Left, top, 0, b.Measure(0));
+            float w = b.HitArea().Width;
+            b.Bounds = new RectangleF(Bounds.Left + (Bounds.Width - w) / 2, top, 0, b.Measure(0));
+            b.Paint(g, true, hovering);
+            button = b;
+        }
+
+        // What's new, scrolled with the mouse wheel when it's long.
+        private void Notes(Graphics g, RectangleF area)
+        {
+            notesArea = area;
+            Updater.Release release = updater.Available;
+            string text = release == null || release.Notes.Length == 0 ? "A new version of Onkey." : release.Notes;
+            if (updater.Moving) text = "He'll move into " + updater.InstallFolder() + ".\n\n" + text;
+            notesHeight = g.MeasureString(text, Form.SmallFont, (int)area.Width - 8).Height;
+            scroll = Math.Max(0, Math.Min(Math.Max(0, notesHeight - area.Height), scroll));
+            GraphicsState state = g.Save();
+            g.SetClip(area);
+            using (Brush ink = new SolidBrush(Jungle.Ink))
+                g.DrawString(text, Form.SmallFont, ink, new RectangleF(area.Left, area.Top - scroll, area.Width - 8, notesHeight + 4));
+            g.Restore(state);
+            if (notesHeight > area.Height)
+            {
+                // A thin vine down the side shows where you are in the notes.
+                float thumb = Math.Max(20, area.Height * area.Height / notesHeight);
+                float at = area.Top + (area.Height - thumb) * scroll / (notesHeight - area.Height);
+                using (Pen track = new Pen(Color.FromArgb(70, Jungle.Ink), 2)) g.DrawLine(track, area.Right - 2, area.Top, area.Right - 2, area.Bottom);
+                using (Pen bar = new Pen(Jungle.Vine, 4)) { bar.StartCap = bar.EndCap = LineCap.Round; g.DrawLine(bar, area.Right - 2, at, area.Right - 2, at + thumb); }
+            }
+        }
+
+        // Three coconuts bouncing one after another: the loading animation.
+        private void Coconuts(Graphics g, PointF centre)
+        {
+            float ground = centre.Y + 20;
+            using (Pen vine = new Pen(Jungle.Vine, 3)) { vine.StartCap = vine.EndCap = LineCap.Round; g.DrawCurve(vine, Sketch.Wiggle(new PointF(centre.X - 54, ground + 4), new PointF(centre.X + 54, ground + 4), 9, 1.5f)); }
+            for (int i = 0; i < 3; i++)
+            {
+                double phase = time * 2.2 - i * 0.22;
+                phase -= Math.Floor(phase);
+                float hop = (float)Math.Sin(phase * Math.PI) * 26;
+                float squash = phase < 0.08 || phase > 0.92 ? 0.85f : 1f;
+                float x = centre.X + (i - 1) * 34, radius = 10;
+                float shadow = radius * (1 - hop / 60);
+                using (Brush s = new SolidBrush(Color.FromArgb(46, Jungle.Ink))) g.FillEllipse(s, x - shadow, ground, shadow * 2, 4);
+                GraphicsState state = g.Save();
+                g.TranslateTransform(x, ground - radius * squash - hop);
+                g.ScaleTransform(1 / squash, squash);
+                using (GraphicsPath shell = Sketch.Circle(PointF.Empty, radius, 30 + i, 0.7f))
+                {
+                    using (Brush b = new SolidBrush(Jungle.Bark)) g.FillPath(b, shell);
+                    Sketch.Stroke(g, shell, Jungle.Ink, 1.5f);
+                }
+                using (Brush eyes = new SolidBrush(Color.FromArgb(180, Jungle.Ink)))
+                    for (int e = 0; e < 3; e++)
+                    {
+                        double a = e * 2.1 - 1.6;
+                        g.FillEllipse(eyes, (float)Math.Cos(a) * 4 - 1.3f, (float)Math.Sin(a) * 4 - 1.3f, 2.6f, 2.6f);
+                    }
+                g.Restore(state);
+            }
+        }
+
+        // A vine that grows leaf by leaf as the download comes in.
+        private static void Vine(Graphics g, RectangleF r, float t)
+        {
+            float left = r.Left + 12, right = r.Right - 12, middle = r.Top + r.Height / 2;
+            float x = left + (right - left) * Math.Max(0, Math.Min(1, t));
+            PointF[] vine = Sketch.Wiggle(new PointF(left, middle), new PointF(right, middle), 77, 2.2f);
+            using (Pen dry = new Pen(Color.FromArgb(196, 176, 130), 6f)) { dry.StartCap = dry.EndCap = LineCap.Round; g.DrawCurve(dry, vine); }
+            GraphicsState state = g.Save();
+            g.SetClip(new RectangleF(r.Left - 4, r.Top - 10, x - r.Left + 4, r.Height + 20));
+            using (Pen green = new Pen(Jungle.Vine, 6f)) { green.StartCap = green.EndCap = LineCap.Round; g.DrawCurve(green, vine); }
+            for (float lx = left + 18; lx < x - 6; lx += 26)
+                Jungle.DrawLeaf(g, new PointF(lx, middle - 1), ((int)lx % 2 == 0) ? -50 : 230, 13, 6, Jungle.Leaf, (int)lx);
+            g.Restore(state);
+            using (Pen outline = new Pen(Color.FromArgb(150, Jungle.Ink), 1.2f)) g.DrawCurve(outline, vine);
+            using (GraphicsPath tip = Sketch.Circle(new PointF(x, middle), 7, 3, 0.6f))
+            {
+                using (Brush b = new SolidBrush(Jungle.Banana)) g.FillPath(b, tip);
+                Sketch.Stroke(g, tip, Jungle.Ink, 1.5f);
+            }
         }
     }
 

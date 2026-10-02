@@ -25,9 +25,11 @@ SETTINGS PANEL (click the tray icon)
   Look            size, how see-through he is, in front of windows or on
                   the desktop behind them, whether he stays over full-screen
                   apps (videos, games), eyes that watch your cursor, blinking
-  Updates         Check for updates: when there's a newer Onkey, choose
-                  Update and Onkey downloads it, replaces the files in this
-                  folder, and restarts with your settings kept. Check by
+  Updates         Opening this tab looks for a newer Onkey right there.
+                  When there is one, it shows what's new; choose "Update and
+                  restart" and Onkey downloads it (you see the progress),
+                  replaces the files in this folder, and restarts with your
+                  settings kept. Check by
                   himself: once shortly after launch and then every six
                   hours, with a note by the clock when a new version is out.
                   Open at startup: when Windows starts.

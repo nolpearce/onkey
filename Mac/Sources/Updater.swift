@@ -3,8 +3,9 @@ import CryptoKit
 
 // Checks GitHub Releases for a newer Onkey and installs it in place: downloads
 // Onkey-Mac.zip, checks it against the SHA-256 GitHub lists for it, unzips it beside the
-// running app, then quits and lets a tiny shell script swap the app and reopen it. The
-// release notes are shown in the prompt, so nobody is sent to the website.
+// running app, then quits and lets a tiny shell script swap the app and reopen it. It never
+// pops up a window: the Updates tab of the settings panel shows what it's doing (looking,
+// what's new, download progress, or what went wrong), so the whole update happens there.
 // Windows/Source/Updater.cs does the same for the Windows version.
 final class Updater {
     struct Release {
@@ -12,6 +13,16 @@ final class Updater {
         let download: URL
         let sha256: String?
         let notes: String
+    }
+
+    enum Phase: Equatable {
+        case idle            // Hasn't looked yet.
+        case checking
+        case upToDate
+        case available       // `available` holds the release.
+        case downloading     // `progress` runs from 0 to 1.
+        case restarting
+        case failed(String)
     }
 
     static let latestURL = URL(string: "https://api.github.com/repos/nolpearce/onkey/releases/latest")!
@@ -22,19 +33,23 @@ final class Updater {
 
     // A newer release, once a check has found one.
     private(set) var available: Release?
-    private(set) var downloading = false
-    // Called on the main thread whenever `available` or `downloading` changes.
+    private(set) var phase = Phase.idle
+    private(set) var progress = 0.0
+    private(set) var lastChecked: Date?
+    var downloading: Bool { phase == .downloading || phase == .restarting }
+    // Called on the main thread whenever any of the above changes.
     var onChange: (() -> Void)?
     private var timer: Timer?
+    private var progressWatch: NSKeyValueObservation?
 
     // Checks shortly after launch and then every six hours, quietly.
     func startAutomaticChecks() {
         guard timer == nil else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
             guard let self, self.timer != nil else { return }
-            self.check(userAsked: false)
+            self.check()
         }
-        let t = Timer(timeInterval: 6 * 60 * 60, repeats: true) { [weak self] _ in self?.check(userAsked: false) }
+        let t = Timer(timeInterval: 6 * 60 * 60, repeats: true) { [weak self] _ in self?.check() }
         RunLoop.main.add(t, forMode: .common)
         timer = t
     }
@@ -44,15 +59,19 @@ final class Updater {
         timer = nil
     }
 
-    // The menu item: installs a release already found, or looks for one.
-    func menuChosen() {
-        if available != nil { offerInstall() } else { check(userAsked: true) }
+    // Looks again when the Updates tab opens, unless it looked in the last minute.
+    func checkIfStale() {
+        if phase == .idle || (phase != .checking && !downloading && Date().timeIntervalSince(lastChecked ?? .distantPast) > 60) {
+            check()
+        }
     }
 
-    // Asks GitHub for the latest release. Quiet checks only update the menu; when the user
-    // asked, they also hear "you're up to date" or what went wrong.
-    func check(userAsked: Bool) {
-        guard !downloading else { return }
+    // Asks GitHub for the latest release. The answer shows in the Updates tab; the search
+    // shows for at least a moment, so the loading animation never just flickers.
+    func check() {
+        guard phase != .checking, !downloading else { return }
+        set(.checking)
+        let started = Date()
         var request = URLRequest(url: Self.latestURL, timeoutInterval: 20)
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         request.setValue("Onkey/\(Self.current)", forHTTPHeaderField: "User-Agent")
@@ -66,43 +85,32 @@ final class Updater {
                 let status = (response as? HTTPURLResponse)?.statusCode ?? 0
                 result = .failure(UpdateError("GitHub answered with something Onkey didn't understand (HTTP \(status))."))
             }
-            DispatchQueue.main.async { self?.checked(result, userAsked: userAsked) }
+            let wait = max(0, 0.9 - Date().timeIntervalSince(started))
+            DispatchQueue.main.asyncAfter(deadline: .now() + wait) { self?.checked(result) }
         }.resume()
     }
 
-    private func checked(_ result: Result<Release?, Error>, userAsked: Bool) {
+    private func checked(_ result: Result<Release?, Error>) {
+        lastChecked = Date()
         switch result {
         case .success(let release):
             available = release
-            onChange?()
-            if userAsked {
-                if release != nil { offerInstall() } else { say("You have the latest Onkey", "Version \(Self.current) is the newest one.") }
-            }
+            set(release == nil ? .upToDate : .available)
         case .failure(let error):
-            if userAsked { say("Couldn't check for updates", error.localizedDescription) }
+            // Keep showing a release already found; otherwise say what went wrong.
+            set(available != nil ? .available : .failed("Couldn't reach GitHub. \(error.localizedDescription)"))
         }
     }
 
-    private func offerInstall() {
-        guard let release = available else { return }
-        let alert = NSAlert()
-        alert.messageText = "Onkey \(release.version) is out"
-        var text = "You have \(Self.current). Onkey will download the new version, restart, and keep all your settings."
-        if Self.installTarget() != Bundle.main.bundleURL {
-            text += " He'll put the new version in your Applications folder."
-        }
-        if !release.notes.isEmpty { text += "\n\nWhat's new:\n" + release.notes }
-        alert.informativeText = text
-        alert.addButton(withTitle: "Update and Restart")
-        alert.addButton(withTitle: "Later")
-        NSApp.activate(ignoringOtherApps: true)
-        if alert.runModal() == .alertFirstButtonReturn { install(release) }
+    private func set(_ new: Phase) {
+        phase = new
+        onChange?()
     }
 
     // Where the new Onkey.app goes: over this one, unless macOS is running him from a
     // read-only copy (App Translocation, when he's opened straight from Downloads) or his
     // folder can't be written, in which case he moves into Applications.
-    private static func installTarget() -> URL {
+    static func installTarget() -> URL {
         let app = Bundle.main.bundleURL
         let fm = FileManager.default
         if !app.path.contains("/AppTranslocation/"), fm.isWritableFile(atPath: app.deletingLastPathComponent().path) { return app }
@@ -115,15 +123,17 @@ final class Updater {
 
     // MARK: Installing
 
-    private func install(_ release: Release) {
+    // Downloads and installs the release the last check found, then restarts.
+    func install() {
+        guard let release = available, !downloading else { return }
         let app = Self.installTarget()
         guard FileManager.default.isWritableFile(atPath: app.deletingLastPathComponent().path) else {
-            say("Onkey can't update himself", "He can't write to \(app.deletingLastPathComponent().path). Drag Onkey.app into your Applications folder, open him from there, and try again.")
+            set(.failed("Onkey can't write to \(app.deletingLastPathComponent().path). Drag Onkey.app into Applications, open him from there, and try again."))
             return
         }
-        downloading = true
-        onChange?()
-        URLSession.shared.downloadTask(with: release.download) { [weak self] file, _, error in
+        progress = 0
+        set(.downloading)
+        let task = URLSession.shared.downloadTask(with: release.download) { [weak self] file, _, error in
             let outcome: Result<URL, Error>
             if let file {
                 outcome = Result { try Self.unpack(file, release: release, beside: app) }
@@ -132,14 +142,27 @@ final class Updater {
             }
             DispatchQueue.main.async {
                 guard let self else { return }
-                self.downloading = false
-                self.onChange?()
+                self.progressWatch = nil
                 switch outcome {
-                case .success(let newApp): self.relaunch(replacing: app, with: newApp)
-                case .failure(let error): self.say("Onkey couldn't update", error.localizedDescription)
+                case .success(let newApp):
+                    self.progress = 1
+                    self.set(.restarting)
+                    // A beat to show "Restarting", then swap.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { self.relaunch(replacing: app, with: newApp) }
+                case .failure(let error):
+                    self.set(.failed("The update didn't work. \(error.localizedDescription)"))
                 }
             }
-        }.resume()
+        }
+        progressWatch = task.progress.observe(\.fractionCompleted) { [weak self] p, _ in
+            let done = p.fractionCompleted
+            DispatchQueue.main.async {
+                guard let self, self.phase == .downloading, done - self.progress > 0.01 || done >= 1 else { return }
+                self.progress = done
+                self.onChange?()
+            }
+        }
+        task.resume()
     }
 
     // Checks the download and unzips it into a scratch folder on the same disk as the app,
@@ -181,7 +204,7 @@ final class Updater {
         do {
             try swap.run()
         } catch {
-            say("Onkey couldn't update", error.localizedDescription)
+            set(.failed("The update didn't work. \(error.localizedDescription)"))
             return
         }
         NSApp.terminate(nil)
@@ -201,7 +224,7 @@ final class Updater {
                        notes: plainNotes(json["body"] as? String ?? ""))
     }
 
-    // The release notes without their Markdown, short enough for an alert.
+    // The release notes without their Markdown, for the Updates tab.
     static func plainNotes(_ markdown: String) -> String {
         var lines: [String] = []
         for raw in markdown.replacingOccurrences(of: "\r", with: "").split(separator: "\n", omittingEmptySubsequences: false) {
@@ -213,7 +236,7 @@ final class Updater {
             lines.append(line)
         }
         var text = lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-        if text.count > 900 { text = String(text.prefix(900)).trimmingCharacters(in: .whitespacesAndNewlines) + "…" }
+        if text.count > 4000 { text = String(text.prefix(4000)).trimmingCharacters(in: .whitespacesAndNewlines) + "…" }
         return text
     }
 
@@ -235,14 +258,6 @@ final class Updater {
         try p.run()
         p.waitUntilExit()
         guard p.terminationStatus == 0 else { throw UpdateError("\(tool) failed (exit \(p.terminationStatus)).") }
-    }
-
-    private func say(_ title: String, _ detail: String) {
-        let alert = NSAlert()
-        alert.messageText = title
-        alert.informativeText = detail
-        NSApp.activate(ignoringOtherApps: true)
-        alert.runModal()
     }
 }
 

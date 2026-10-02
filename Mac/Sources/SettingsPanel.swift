@@ -48,6 +48,7 @@ final class SettingsPanel {
         let x = max(screen.minX + 8, min(anchor.midX - Self.size.width / 2, screen.maxX - Self.size.width - 8))
         let home = NSPoint(x: x, y: anchor.minY - Self.size.height - 6)
         model.objectWillChange.send()
+        if model.tab == SettingsView.updatesTab { model.app.updater.checkIfStale() }
         // It fades in while dropping the last few points into place under the icon.
         closing = false
         showCount += 1
@@ -68,6 +69,11 @@ final class SettingsPanel {
             guard let self, !self.panel.frame.contains(NSEvent.mouseLocation) else { return }
             self.close()
         }
+    }
+
+    func showTab(_ tab: Int) {
+        withAnimation(.easeInOut(duration: 0.16)) { model.tab = tab }
+        if tab == SettingsView.updatesTab { model.app.updater.checkIfStale() }
     }
 
     // Fades out while lifting back toward the icon, then hides.
@@ -95,6 +101,7 @@ final class SettingsPanel {
 final class SettingsModel: ObservableObject {
     unowned let app: OnkeyApp
     let head: NSImage
+    @Published var tab = 0
 
     init(app: OnkeyApp) {
         self.app = app
@@ -313,8 +320,9 @@ struct SketchBox: View {
 
 struct SettingsView: View {
     @ObservedObject var model: SettingsModel
-    @State private var tab = 0
+    private var tab: Int { model.tab }
     private let tabs = ["Moves", "Sound", "Look", "Updates"]
+    static let updatesTab = 3
     private static let cardTop: CGFloat = 124, footerHeight: CGFloat = 50
 
     var body: some View {
@@ -394,16 +402,32 @@ struct SettingsView: View {
             }
             Text(tabs[i]).font(Jungle.tab).foregroundColor(selected ? Jungle.ink : Jungle.paper)
                 .offset(y: selected ? -2 : 0)
+            if i == Self.updatesTab && model.app.updater.available != nil {
+                // A banana on the Updates tab while there's a new Onkey to get.
+                Canvas { ctx, size in
+                    let dot = Sketch.circle(CGPoint(x: size.width / 2, y: size.height / 2), 5, seed: 5, wobble: 0.5)
+                    ctx.fill(dot, with: .color(Jungle.banana))
+                    ctx.stroke(dot, with: .color(Jungle.ink), lineWidth: 1.2)
+                }
+                .frame(width: 11, height: 11)
+                .offset(x: width / 2 - 5, y: -height / 2 + 3)
+            }
         }
         .frame(width: width, height: height + (selected ? 4 : 0))
         .contentShape(Rectangle())
-        .onTapGesture { withAnimation(.easeInOut(duration: 0.16)) { tab = i } }
+        .onTapGesture { select(i) }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(tabs[i])
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
-        .accessibilityValue(selected ? "selected" : "")
-        .accessibilityAction { tab = i }
+        .accessibilityValue([selected ? "selected" : "", i == Self.updatesTab && model.app.updater.available != nil ? "new version" : ""]
+            .filter { !$0.isEmpty }.joined(separator: ", "))
+        .accessibilityAction { select(i) }
         .offset(x: x, y: Self.cardTop - height + (selected ? 4 : 0))
+    }
+
+    private func select(_ i: Int) {
+        withAnimation(.easeInOut(duration: 0.16)) { model.tab = i }
+        if i == Self.updatesTab { model.app.updater.checkIfStale() }
     }
 
     @ViewBuilder private var page: some View {
@@ -597,24 +621,193 @@ struct UpdatesPage: View {
     @ObservedObject var model: SettingsModel
 
     var body: some View {
-        let updater = model.app.updater
         VStack(alignment: .leading, spacing: 10) {
-            Group {
-                if let release = updater.available {
-                    Text(updater.downloading ? "Downloading Onkey \(release.version)…" : "Onkey \(release.version) is out!")
-                } else {
-                    Text("You have Onkey \(Updater.current).")
-                }
-            }
-            .font(Jungle.label).foregroundColor(Jungle.ink)
-            SignButton(title: updater.available.map { "Update to Onkey \($0.version)" } ?? "Check for updates") {
-                model.app.checkForUpdates()
-            }
-            .disabled(updater.downloading)
+            let updater = model.app.updater
+            UpdateCard(updater: updater, phase: updater.phase, progress: updater.progress, head: model.head).frame(height: 236)
             InlineRow(label: "Check by himself", caption: "looks every few hours") { LeafSwitch(isOn: model.binding(Key.checkUpdates), label: "Check by himself") }
             InlineRow(label: "Open at login", caption: "when you log in to your Mac") {
                 LeafSwitch(isOn: Binding(get: { model.app.opensAtLogin }, set: { _ in model.app.toggleLogin() }), label: "Open at login")
             }
+        }
+    }
+}
+
+// The whole update, in one sketched box: looking for a new Onkey, what's new in it, the
+// download growing along a vine, and restarting. Each step fades into the next.
+struct UpdateCard: View {
+    let updater: Updater
+    // Passed in (rather than read from the updater) so SwiftUI sees each change.
+    let phase: Updater.Phase
+    let progress: Double
+    let head: NSImage
+
+    private var step: String {
+        switch phase {
+        case .idle, .checking: return "checking"
+        case .upToDate: return "current"
+        case .available: return "available"
+        case .downloading: return "downloading"
+        case .restarting: return "restarting"
+        case .failed: return "failed"
+        }
+    }
+
+    var body: some View {
+        ZStack {
+            SketchBox(radius: 12, seed: 21, fill: Jungle.pod.opacity(0.5), line: 1.6, wobble: 1.2)
+            content
+                .padding(14)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .id(step)
+                .transition(.opacity.combined(with: .scale(scale: 0.97)))
+        }
+        .animation(.easeInOut(duration: 0.25), value: step)
+    }
+
+    @ViewBuilder private var content: some View {
+        let version = updater.available?.version ?? ""
+        switch phase {
+        case .idle, .checking:
+            VStack(spacing: 10) {
+                Spacer()
+                BouncingCoconuts().frame(width: 120, height: 56)
+                Text("Looking for a new Onkey…").font(Jungle.label).foregroundColor(Jungle.ink)
+                Text("You have Onkey \(Updater.current).").font(Jungle.small).foregroundColor(Jungle.faded)
+                Spacer()
+            }
+        case .upToDate:
+            VStack(spacing: 8) {
+                Spacer()
+                Image(nsImage: head).resizable().interpolation(.high).aspectRatio(contentMode: .fit).frame(width: 52, height: 52)
+                    .accessibilityHidden(true)
+                Text("You're up to date!").font(Jungle.label).foregroundColor(Jungle.ink)
+                Text("Onkey \(Updater.current) is the newest one.").font(Jungle.small).foregroundColor(Jungle.faded)
+                SignButton(title: "Check again", small: true) { updater.check() }.padding(.top, 4)
+                Spacer()
+            }
+        case .available:
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Onkey \(version) is out!").font(Jungle.label).foregroundColor(Jungle.ink)
+                    Spacer()
+                    Text("you have \(Updater.current)").font(Jungle.small).foregroundColor(Jungle.faded)
+                }
+                ScrollView {
+                    Text(updater.available?.notes.isEmpty == false ? updater.available!.notes : "A new version of Onkey.")
+                        .font(Jungle.small).foregroundColor(Jungle.ink)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxHeight: .infinity)
+                HStack {
+                    Spacer()
+                    SignButton(title: "Update and restart") { updater.install() }
+                    Spacer()
+                }
+                if Updater.installTarget() != Bundle.main.bundleURL {
+                    Text("He'll move into your Applications folder.").font(Jungle.small).foregroundColor(Jungle.faded)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+        case .downloading:
+            VStack(spacing: 10) {
+                Spacer()
+                Text("Downloading Onkey \(version)…").font(Jungle.label).foregroundColor(Jungle.ink)
+                VineProgress(progress: progress)
+                    .animation(.easeOut(duration: 0.3), value: progress)
+                    .frame(height: 40)
+                    .accessibilityElement()
+                    .accessibilityLabel("Download")
+                    .accessibilityValue(percent(progress))
+                Text(percent(progress)).font(Jungle.small).foregroundColor(Jungle.faded).accessibilityHidden(true)
+                Spacer()
+            }
+        case .restarting:
+            VStack(spacing: 10) {
+                Spacer()
+                BouncingCoconuts().frame(width: 120, height: 56)
+                Text("Restarting with Onkey \(version)…").font(Jungle.label).foregroundColor(Jungle.ink)
+                Text("Your settings come with him.").font(Jungle.small).foregroundColor(Jungle.faded)
+                Spacer()
+            }
+        case .failed(let message):
+            VStack(spacing: 8) {
+                Spacer()
+                Text("Hmm, that didn't work").font(Jungle.label).foregroundColor(Jungle.ink)
+                Text(message).font(Jungle.small).foregroundColor(Jungle.faded).multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                SignButton(title: "Try again", small: true) { updater.check() }.padding(.top, 4)
+                Spacer()
+            }
+        }
+    }
+}
+
+// Three coconuts bouncing one after another: the loading animation.
+struct BouncingCoconuts: View {
+    var body: some View {
+        TimelineView(.animation) { timeline in
+            let t = timeline.date.timeIntervalSinceReferenceDate
+            Canvas { ctx, size in
+                let ground = size.height - 8
+                ctx.stroke(Sketch.line(CGPoint(x: 6, y: ground + 4), CGPoint(x: size.width - 6, y: ground + 4), seed: 9, wobble: 1.5),
+                           with: .color(Jungle.vine), style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                for i in 0..<3 {
+                    let phase = (t * 2.2 - Double(i) * 0.22).truncatingRemainder(dividingBy: 1)
+                    let p = phase < 0 ? phase + 1 : phase
+                    let hop = CGFloat(sin(p * .pi)) * 26          // Up and back down each beat.
+                    let squash = p < 0.08 || p > 0.92 ? 0.85 : 1.0 // A little squash on landing.
+                    let x = size.width / 2 + CGFloat(i - 1) * 34
+                    let r: CGFloat = 10
+                    let center = CGPoint(x: x, y: ground - r * CGFloat(squash) - hop)
+                    // Its shadow shrinks as it rises.
+                    let shadow = r * (1 - hop / 60)
+                    ctx.fill(Path(ellipseIn: CGRect(x: x - shadow, y: ground, width: shadow * 2, height: 4)), with: .color(Jungle.ink.opacity(0.18)))
+                    var nut = ctx
+                    nut.translateBy(x: center.x, y: center.y)
+                    nut.scaleBy(x: 1 / CGFloat(squash), y: CGFloat(squash))
+                    let shell = Sketch.circle(.zero, r, seed: 30 + i, wobble: 0.7)
+                    nut.fill(shell, with: .color(Jungle.bark))
+                    nut.pencil(shell, Jungle.ink, 1.5)
+                    for e in 0..<3 {
+                        let a = Double(e) * 2.1 - 1.6
+                        nut.fill(Path(ellipseIn: CGRect(x: CGFloat(cos(a)) * 4 - 1.3, y: CGFloat(sin(a)) * 4 - 1.3, width: 2.6, height: 2.6)),
+                                 with: .color(Jungle.ink.opacity(0.7)))
+                    }
+                }
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+// A vine that grows leaf by leaf as the download comes in.
+struct VineProgress: View, Animatable {
+    var progress: Double
+    var animatableData: Double {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    var body: some View {
+        Canvas { ctx, size in
+            let left: CGFloat = 12, right = size.width - 12, mid = size.height / 2
+            let x = left + (right - left) * CGFloat(max(0, min(1, progress)))
+            let vine = Sketch.line(CGPoint(x: left, y: mid), CGPoint(x: right, y: mid), seed: 77, wobble: 2.2)
+            let round = StrokeStyle(lineWidth: 6, lineCap: .round)
+            ctx.stroke(vine, with: .color(Jungle.dryVine), style: round)
+            var grown = ctx
+            grown.clip(to: Path(CGRect(x: 0, y: 0, width: x, height: size.height)))
+            grown.stroke(vine, with: .color(Jungle.vine), style: round)
+            var lx = left + 18
+            while lx < x - 6 {
+                grown.leaf(at: CGPoint(x: lx, y: mid - 1), angle: Int(lx) % 2 == 0 ? -50 : 230, length: 13, width: 6, color: Jungle.leaf)
+                lx += 26
+            }
+            ctx.stroke(vine, with: .color(Jungle.ink.opacity(0.6)), lineWidth: 1.2)
+            let tip = Sketch.circle(CGPoint(x: x, y: mid), 7, seed: 3, wobble: 0.6)
+            ctx.fill(tip, with: .color(Jungle.banana))
+            ctx.pencil(tip, Jungle.ink, 1.5)
         }
     }
 }

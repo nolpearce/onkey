@@ -23,8 +23,10 @@ namespace OnkeyDesktopPet
     // Checks GitHub Releases for a newer Onkey and installs it in place: downloads
     // Onkey-Windows.zip, checks it against the SHA-256 GitHub lists for it, unzips it, then
     // exits and lets the new Onkey.exe (run with --install, see Installer below) copy itself
-    // over this folder and start again. The release notes are shown in the prompt, so nobody
-    // is sent to the website. Mac/Sources/Updater.swift does the same for the Mac version.
+    // over this folder and start again. It never pops up a window: the Updates tab of the
+    // settings panel shows what it's doing (looking, what's new, download progress, or what
+    // went wrong), so the whole update happens there. Mac/Sources/Updater.swift does the same
+    // for the Mac version.
     internal sealed class Updater
     {
         private const string LatestUrl = "https://api.github.com/repos/nolpearce/onkey/releases/latest";
@@ -35,10 +37,15 @@ namespace OnkeyDesktopPet
             public string Version, Download, Sha256, Notes;
         }
 
+        public enum Phase { Idle, Checking, UpToDate, Available, Downloading, Restarting, Failed }
+
         // A newer release, once a check has found one.
         public Release Available;
-        public bool Downloading;
-        // Called on the UI thread whenever Available or Downloading changes.
+        public Phase State = Phase.Idle;
+        public double Progress;       // 0 to 1 while downloading.
+        public string Problem = "";   // What went wrong, when State is Failed.
+        public bool Downloading { get { return State == Phase.Downloading || State == Phase.Restarting; } }
+        // Called on the UI thread whenever any of the above changes.
         public event Action Changed;
 
         private readonly string appFolder;
@@ -46,10 +53,11 @@ namespace OnkeyDesktopPet
         private readonly Action exit;
         private readonly SynchronizationContext ui;
         private readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer();
-        private bool checking, firstCheck;
+        private bool firstCheck;
+        private DateTime lastChecked = DateTime.MinValue;
         private string announced;
 
-        public Updater(string appFolder, NotifyIcon tray, Action exit)
+        public Updater(string appFolder, NotifyIcon tray, Action exit, Action showUpdates)
         {
             this.appFolder = appFolder;
             this.tray = tray;
@@ -60,9 +68,9 @@ namespace OnkeyDesktopPet
             timer.Tick += delegate
             {
                 if (firstCheck) { firstCheck = false; timer.Interval = 6 * 60 * 60 * 1000; }
-                Check(false);
+                Check();
             };
-            tray.BalloonTipClicked += delegate { if (Available != null) OfferInstall(); };
+            tray.BalloonTipClicked += delegate { if (Available != null) showUpdates(); };
         }
 
         // Checks shortly after launch and then every six hours, quietly.
@@ -76,21 +84,22 @@ namespace OnkeyDesktopPet
 
         public void StopAutomaticChecks() { timer.Stop(); }
 
-        // The menu item: installs a release already found, or looks for one.
-        public void MenuChosen()
+        // Looks again when the Updates tab opens, unless it looked in the last minute.
+        public void CheckIfStale()
         {
-            if (Available != null) OfferInstall(); else Check(true);
+            if (State == Phase.Idle || (State != Phase.Checking && !Downloading && (DateTime.Now - lastChecked).TotalSeconds > 60)) Check();
         }
 
-        // Asks GitHub for the latest release. Quiet checks only update the menu (and show a
-        // balloon once per new version); when the user asked, they also hear "you're up to
-        // date" or what went wrong.
-        public void Check(bool userAsked)
+        // Asks GitHub for the latest release. The answer shows in the Updates tab; the search
+        // shows for at least a moment, so the loading animation never just flickers. The first
+        // time a quiet check finds a new version, a note by the clock says so.
+        public void Check()
         {
-            if (checking || Downloading) return;
-            checking = true;
+            if (State == Phase.Checking || Downloading) return;
+            SetState(Phase.Checking);
             ThreadPool.QueueUserWorkItem(delegate
             {
+                Stopwatch took = Stopwatch.StartNew();
                 Release release = null;
                 string error = null;
                 try
@@ -103,96 +112,130 @@ namespace OnkeyDesktopPet
                     if (release == null) error = "GitHub answered with something Onkey didn't understand.";
                 }
                 catch (Exception ex) { error = ex.Message; }
-                ui.Post(delegate { Checked(release, error, userAsked); }, null);
+                int wait = 900 - (int)took.ElapsedMilliseconds;
+                if (wait > 0) Thread.Sleep(wait);
+                ui.Post(delegate { Checked(release, error); }, null);
             });
         }
 
-        private void Checked(Release release, string error, bool userAsked)
+        private void Checked(Release release, string error)
         {
-            checking = false;
+            lastChecked = DateTime.Now;
             if (error != null)
             {
-                if (userAsked) MessageBox.Show("Couldn't check for updates: " + error, "Onkey");
+                // Keep showing a release already found; otherwise say what went wrong.
+                if (Available != null) SetState(Phase.Available);
+                else Fail("Couldn't reach GitHub. " + error);
                 return;
             }
             Available = IsNewer(release.Version, Program.Version) ? release : null;
-            if (Changed != null) Changed();
-            if (userAsked)
-            {
-                if (Available != null) OfferInstall();
-                else MessageBox.Show("You have the latest Onkey (version " + Program.Version + ").", "Onkey");
-            }
-            else if (Available != null && announced != Available.Version)
+            SetState(Available != null ? Phase.Available : Phase.UpToDate);
+            if (Available != null && announced != Available.Version)
             {
                 announced = Available.Version;
                 tray.ShowBalloonTip(8000, "Onkey " + Available.Version + " is out",
-                    "Click here, or right-click Onkey's icon and choose \"Update to Onkey " + Available.Version + "\".", ToolTipIcon.Info);
+                    "Click here, or click Onkey's icon and open Updates.", ToolTipIcon.Info);
             }
         }
 
-        private void OfferInstall()
+        private void SetState(Phase state)
         {
-            Release release = Available;
-            if (release == null || Downloading) return;
-            string text = "Onkey " + release.Version + " is out (you have " + Program.Version + ").\n\n" +
-                "Update now? Onkey will download it, restart, and keep all your settings.";
-            if (InstallFolder() != appFolder) text += " He'll move into " + InstallFolder() + ", since he can't write to this folder.";
-            if (release.Notes.Length > 0) text += "\n\nWhat's new:\n" + release.Notes;
-            if (MessageBox.Show(text, "Update Onkey", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
-                Install(release);
+            State = state;
+            if (Changed != null) Changed();
+        }
+
+        private void Fail(string problem)
+        {
+            Problem = problem;
+            SetState(Phase.Failed);
         }
 
         // Where the new files go: over this folder, or into the user's own programs folder when
         // this one can't be written (for example if he was put in Program Files).
-        private string InstallFolder()
+        public string InstallFolder()
         {
             if (CanWrite(appFolder)) return appFolder;
             return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), Path.Combine("Programs", "Onkey"));
         }
 
+        public bool Moving { get { return InstallFolder() != appFolder; } }
+
         // Installing
 
-        private void Install(Release release)
+        // Downloads and installs the release the last check found, then restarts.
+        public void Install()
         {
+            Release release = Available;
+            if (release == null || Downloading) return;
             // In a copy of the repo the assets live in ..\Assets rather than beside
             // Onkey.exe; that copy is updated with git, not with release downloads.
             if (!OnkeyApp.IsReleaseFolder(appFolder))
             {
-                MessageBox.Show("This Onkey runs from a copy of the code, so update it with \"git pull\" instead.", "Onkey");
+                Fail("This Onkey runs from a copy of the code, so update him with \"git pull\" instead.");
                 return;
             }
             string target = InstallFolder();
             try { Directory.CreateDirectory(target); } catch { }
             if (!CanWrite(target))
             {
-                MessageBox.Show("Onkey can't write to " + target + ", so he can't update himself.", "Onkey");
+                Fail("Onkey can't write to " + target + ", so he can't update himself.");
                 return;
             }
-            Downloading = true;
-            if (Changed != null) Changed();
+            Progress = 0;
+            SetState(Phase.Downloading);
             ThreadPool.QueueUserWorkItem(delegate
             {
                 string unpacked = null, error = null;
-                try { unpacked = DownloadAndUnpack(release); }
+                try { unpacked = DownloadAndUnpack(release, ReportProgress); }
                 catch (Exception ex) { error = ex.Message; }
                 ui.Post(delegate
                 {
-                    Downloading = false;
-                    if (Changed != null) Changed();
-                    if (error != null) MessageBox.Show("Onkey couldn't update: " + error, "Onkey");
-                    else Relaunch(unpacked, target);
+                    if (error != null) { Fail("The update didn't work: " + error); return; }
+                    Progress = 1;
+                    SetState(Phase.Restarting);
+                    // A beat to show "Restarting", then hand over.
+                    System.Windows.Forms.Timer pause = new System.Windows.Forms.Timer();
+                    pause.Interval = 600;
+                    pause.Tick += delegate { pause.Dispose(); Relaunch(unpacked, target); };
+                    pause.Start();
                 }, null);
             });
         }
 
+        // Called from the download thread; passes the progress to the UI a step at a time.
+        private void ReportProgress(double done)
+        {
+            ui.Post(delegate
+            {
+                if (State != Phase.Downloading || done - Progress < 0.01 && done < 1) return;
+                Progress = done;
+                if (Changed != null) Changed();
+            }, null);
+        }
+
         // Downloads, checks and unzips the release into a scratch folder in %TEMP%, returning
         // the folder holding the new files. Runs off the UI thread.
-        private static string DownloadAndUnpack(Release release)
+        private static string DownloadAndUnpack(Release release, Action<double> progress)
         {
             string scratch = Path.Combine(Path.GetTempPath(), "Onkey-update-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(scratch);
             string zip = Path.Combine(scratch, AssetName);
-            using (WebClient web = NewClient()) web.DownloadFile(release.Download, zip);
+            using (WebClient web = NewClient())
+            using (Stream from = web.OpenRead(release.Download))
+            using (FileStream to = File.Create(zip))
+            {
+                long total;
+                if (!long.TryParse(web.ResponseHeaders[HttpResponseHeader.ContentLength], out total)) total = 0;
+                byte[] buffer = new byte[64 * 1024];
+                long got = 0;
+                int n;
+                while ((n = from.Read(buffer, 0, buffer.Length)) > 0)
+                {
+                    to.Write(buffer, 0, n);
+                    got += n;
+                    if (total > 0) progress(Math.Min(1, (double)got / total));
+                }
+            }
 
             if (release.Sha256 != null)
             {
@@ -226,7 +269,7 @@ namespace OnkeyDesktopPet
             try { Process.Start(start); }
             catch (Exception ex)
             {
-                MessageBox.Show("Onkey couldn't update: " + ex.Message, "Onkey");
+                Fail("The update didn't work: " + ex.Message);
                 return;
             }
             exit();
@@ -300,7 +343,7 @@ namespace OnkeyDesktopPet
         // trailing backslash would escape the closing quote, so it's dropped.
         private static string Arg(string s) { return "\"" + s.TrimEnd('\\') + "\""; }
 
-        // The release notes without their Markdown, short enough for a message box.
+        // The release notes without their Markdown, for the Updates tab.
         private static string PlainNotes(string markdown)
         {
             List<string> lines = new List<string>();
@@ -312,7 +355,7 @@ namespace OnkeyDesktopPet
                 lines.Add(line);
             }
             string text = string.Join("\n", lines.ToArray()).Trim();
-            if (text.Length > 900) text = text.Substring(0, 900).Trim() + "\u2026";
+            if (text.Length > 4000) text = text.Substring(0, 4000).Trim() + "\u2026";
             return text;
         }
 
