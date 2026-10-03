@@ -14,7 +14,7 @@ namespace OnkeyDesktopPet
     // and every change takes effect straight away. It closes when you click anywhere else.
     internal sealed class SettingsPanel : Form
     {
-        public const float PageWidth = 380, PageHeight = 566;
+        public const float PageWidth = 380, PageHeight = 616;
         // The card the settings sit on, and the columns inside it.
         public const float CardLeft = 12, CardTop = 124, CardRight = PageWidth - 12, CardBottom = PageHeight - 12;
         public const float LabelLeft = 30, ControlRight = CardRight - 18;
@@ -229,6 +229,7 @@ namespace OnkeyDesktopPet
                 double v = app.Settings.Number("speed");
                 return v < 30 ? "a slow stroll" : v < 60 ? "normal" : v < 120 ? "fast" : "zoomies!";
             });
+            Inline(moves, "Floppy arms", Switch("floppyArms"), delegate { return "they dangle when you carry him"; });
             Full(moves, new SketchButton("Bring Onkey to this screen", delegate { app.BringHere(); }));
 
             Page sound = AddPage("Sound");
@@ -262,6 +263,7 @@ namespace OnkeyDesktopPet
             Inline(look, "Over full-screen apps", fullScreen, delegate { return "videos, games, slideshows"; });
             Inline(look, "Watch my cursor", Switch("watchCursor"), delegate { return "his eyes follow the mouse"; });
             Inline(look, "Blink", Switch("blink"), delegate { return "now and then"; });
+            Inline(look, "Sketchy arms", Switch("sketchy"), delegate { return "lines wiggle like a drawing"; });
 
             Page updates = AddPage("Updates");
             Full(updates, new UpdateCard(updater, head));

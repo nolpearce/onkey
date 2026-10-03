@@ -20,9 +20,9 @@ To build it yourself instead, install the Xcode Command Line Tools (`xcode-selec
 
 This builds `Onkey.app`, installs it in `/Applications` and launches it. Click the Onkey head in the menu bar and a hand-drawn jungle panel drops down, with **Pause**, **Dance** and **Drag him** switches along the top and four tabs:
 
-- **Moves**: how many Onkeys, where he roams, how often he walks to your mouse, walking speed
+- **Moves**: how many Onkeys, where he roams, how often he walks to your mouse, walking speed, floppy arms that dangle and swing when you carry him
 - **Sound**: on/off, how often, volume, play now. His mouth opens while he makes the sound
-- **Look**: size, see-through, in front of windows or on the desktop, staying over full-screen apps, eyes that watch your cursor, blinking
+- **Look**: size, see-through, in front of windows or on the desktop, staying over full-screen apps, eyes that watch your cursor, blinking, sketchy arms whose lines wiggle like a drawing
 - **Updates**: finds a newer release here on GitHub, then downloads it and restarts Onkey with your settings kept. He also checks on his own every few hours (you can turn that off). Open at login
 
 Dancing bops every Onkey (squashes him down 15%) on the beat of whatever's playing. Right-click the head for a short menu.

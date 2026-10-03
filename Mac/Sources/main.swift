@@ -15,13 +15,13 @@ if let i = CommandLine.arguments.firstIndex(of: "--export"), i + 1 < CommandLine
         CGImageDestinationAddImage(dest, f.image, nil)
         CGImageDestinationFinalize(dest)
     }
-    write(r.render(phase: 0, walking: false, pixelsPerPoint: 1), "idle.png")
-    write(r.render(phase: 0, walking: false, pixelsPerPoint: 4, blankEyes: true), "idle-blank-eyes@4x.png")
+    write(r.render(pixelsPerPoint: 1), "idle.png")
+    write(r.render(pixelsPerPoint: 4, blankEyes: true), "idle-blank-eyes@4x.png")
     // Blink test: the pet view composited offscreen at 4x, eyes half shut then shut.
     let k4 = 4 * (OnkeyRenderer.canvasPoint(CGPoint(x: 1, y: 0), bounce: 0).x - OnkeyRenderer.canvasPoint(.zero, bounce: 0).x)
     for (name, closure) in [("blink-half", [0.5, 0.5]), ("blink-shut", [1.0, 1.0]), ("blink-right-only", [0.0, 1.0])] {
         let view = PetView(frame: NSRect(x: 0, y: 0, width: OnkeyRenderer.canvas.width * 4, height: OnkeyRenderer.canvas.height * 4))
-        view.show(r.render(phase: 0, walking: false, pixelsPerPoint: 4, blankEyes: true)!.image, scale: 1)
+        view.show(r.render(pixelsPerPoint: 4, blankEyes: true)!.image, scale: 1)
         view.showPupils(r.pupils, at: r.pupils.map { p in
             let c = OnkeyRenderer.canvasPoint(p.center, bounce: 0)
             return CGPoint(x: c.x * 4, y: (OnkeyRenderer.canvas.height - c.y) * 4)
@@ -40,7 +40,7 @@ if let i = CommandLine.arguments.firstIndex(of: "--export"), i + 1 < CommandLine
     }
     for (name, open) in [("mouth-half", 0.5), ("mouth-open", 1.0)] {
         let view = PetView(frame: NSRect(x: 0, y: 0, width: OnkeyRenderer.canvas.width * 4, height: OnkeyRenderer.canvas.height * 4))
-        view.show(r.render(phase: 0, walking: false, pixelsPerPoint: 4)!.image, scale: 1)
+        view.show(r.render(pixelsPerPoint: 4)!.image, scale: 1)
         let s0 = k4 / 4, o = OnkeyRenderer.canvasPoint(.zero, bounce: 0)
         view.showMouth(open: open, spriteToView: CGAffineTransform(a: s0 * 4, b: 0, c: 0, d: -s0 * 4, tx: o.x * 4,
                                                                     ty: (OnkeyRenderer.canvas.height - o.y) * 4))
@@ -52,7 +52,7 @@ if let i = CommandLine.arguments.firstIndex(of: "--export"), i + 1 < CommandLine
     }
     // Bop test: at rest and fully squashed (15%), pivoting on his base.
     for (name, squash) in [("bop-rest", 0.0), ("bop-squashed", 0.15)] {
-        let still = r.render(phase: 0, walking: false, pixelsPerPoint: 4)!
+        let still = r.render(pixelsPerPoint: 4)!
         let view = PetView(frame: NSRect(x: 0, y: 0, width: OnkeyRenderer.canvas.width * 4, height: OnkeyRenderer.canvas.height * 4))
         view.show(still.image, scale: 1)
         view.setBase((OnkeyRenderer.canvas.height - still.opaqueBounds.maxY) * 4)
@@ -67,8 +67,27 @@ if let i = CommandLine.arguments.firstIndex(of: "--export"), i + 1 < CommandLine
         write(RenderedFrame(image: pupil.image, opaqueBounds: pupil.rect), "pupil\(n).png")
         print("pupil\(n) rect \(pupil.rect) center \(pupil.center)")
     }
-    for n in 0..<OnkeyRenderer.frameCount {
-        write(r.render(phase: Double(n) / 40 * 2 * .pi, walking: true, pixelsPerPoint: 1), String(format: "frame%02d.png", n))
+    // Rig test: a stride walking left, then picked up, shaken about and put down, at 2x.
+    let rig = ArmRig()
+    let body = r.renderBody(pixelsPerPoint: 2)!
+    let k2 = 2 * CGFloat(OnkeyRenderer.spriteScale)
+    var origin = CGPoint.zero
+    for n in 0..<90 {
+        let dt = 1.0 / 30
+        if n < 30 { rig.walked(dx: -532 * dt, distance: 532 * dt) }
+        let carried = n >= 34 && n < 75
+        if carried { origin.x += n < 50 ? 60 : n < 60 ? -80 : 0; origin.y += n < 40 ? -40 : 0 }
+        _ = rig.update(dt: dt, origin: origin, carried: carried, floppy: true, sketchy: true)
+        let view = PetView(frame: NSRect(x: 0, y: 0, width: OnkeyRenderer.canvas.width * 2, height: OnkeyRenderer.canvas.height * 2))
+        view.show(body.image, scale: 1)
+        view.setBodyLift(CGFloat(rig.bounce) * 2)
+        view.showArms(rig.shapes(sketchy: true), poses: rig.poses, hands: r.hands, map: OnkeyRenderer.spriteToView(size: 2),
+                      pointsPerPixel: k2, contentsScale: 1 / k2)
+        let size = view.bounds.size
+        let ctx = CGContext(data: nil, width: Int(size.width), height: Int(size.height), bitsPerComponent: 8, bytesPerRow: 0,
+                            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        view.layer!.render(in: ctx)
+        write(RenderedFrame(image: ctx.makeImage()!, opaqueBounds: .zero), String(format: "rig%02d.png", n))
     }
     exit(0)
 }

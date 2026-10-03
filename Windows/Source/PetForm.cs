@@ -23,14 +23,15 @@ namespace OnkeyDesktopPet
 
         private readonly OnkeyApp app;
         public Rectangle Area;
-        private double px, py, targetX, targetY, phase, restUntil, nextSound;
+        private double px, py, targetX, targetY, restUntil, nextSound;
         private double blinkStart = -100, nextBlink, mouthOpen;
         public double SoundStart = double.NegativeInfinity;
         private readonly PointF[] gaze = new PointF[2];
         private Bitmap current;
         private float currentBounce;
-        // The bottom of his hands in the frame on show (points, unscaled).
-        private float currentBottom;
+        // His arms, and whether they changed since they were last drawn.
+        private readonly ArmRig rig = new ArmRig();
+        private bool armsChanged;
         private int canvasWidth, canvasHeight;   // Window size in pixels.
         // What's on screen now, so unchanged frames are skipped (resting Onkeys cost nothing).
         private Bitmap shownFrame;
@@ -98,7 +99,7 @@ namespace OnkeyDesktopPet
         public void FramesChanged()
         {
             canvasWidth = app.Idle.Width; canvasHeight = app.Idle.Height;
-            current = app.Idle; currentBounce = 0; currentBottom = app.IdleBottom;
+            current = app.Idle;
             ClientSize = new System.Drawing.Size(canvasWidth, canvasHeight);
             if (surface != null) { surface.Dispose(); surface = null; }
             // If this fails, Present tries again shortly.
@@ -162,7 +163,19 @@ namespace OnkeyDesktopPet
             PickTarget();
         }
 
-        public void ShowIdle() { current = app.Idle; currentBounce = 0; currentBottom = app.IdleBottom; }
+        public void ShowIdle() { current = app.Idle; }
+
+        // Arms
+
+        // Moves his arms on: walking, dangling while he's carried, or settling.
+        public void UpdateArms(double dt)
+        {
+            // Where the canvas's top-left is in "world" sprite pixels, so carrying him swings his arms.
+            double k = PixelScale * OnkeyRenderer.SpriteScale;
+            if (rig.Update(dt, Math.Round(px) / k, Math.Round(py) / k, dragging, app.Settings.Bool("floppyArms"), app.Settings.Bool("sketchy")))
+                armsChanged = true;
+            currentBounce = (float)rig.Bounce;
+        }
         public void RestFor(double seconds) { restUntil = app.Clock + seconds; }
         public void RescheduleSound() { nextSound = app.Clock + app.SoundDelay(); }
 
@@ -243,11 +256,9 @@ namespace OnkeyDesktopPet
             double step = Math.Min(distance, speed * dt);
             px += step * dx / distance;
             py += step * dy / distance;
-            // Faster walking means faster arms, so he never looks like he's skating.
-            phase = (phase + dt * 2 * Math.PI * 1.15 * speed / (42 * PixelScale)) % (2 * Math.PI);
-            Bitmap[] frames = app.Frames;
-            int index = ((int)(phase / (2 * Math.PI) * frames.Length)) % frames.Length;
-            current = frames[index]; currentBounce = app.FrameBounce[index]; currentBottom = app.FrameBottom[index];
+            // His hands step as far as he goes, so he never looks like he's skating.
+            double k = PixelScale * OnkeyRenderer.SpriteScale;
+            rig.Walked(step * dx / distance / k, step / k);
         }
 
         // Eyes, eyelids and mouth
@@ -327,7 +338,7 @@ namespace OnkeyDesktopPet
             int lid0 = (int)Math.Round(Closure(0) * 100), lid1 = (int)Math.Round(Closure(1) * 100);
             int mouth = mouthOpen <= 0.02 ? 0 : (int)Math.Round(mouthOpen * 100);
             int squash = (int)Math.Round(Squash * 1000);
-            bool same = !redraw && current == shownFrame && alpha == shownAlpha && squash == shownSquash
+            bool same = !redraw && !armsChanged && current == shownFrame && alpha == shownAlpha && squash == shownSquash
                 && g0x == shownGaze0X && g0y == shownGaze0Y && g1x == shownGaze1X && g1y == shownGaze1Y
                 && lid0 == shownLid0 && lid1 == shownLid1 && mouth == shownMouth;
             if (same)
@@ -343,22 +354,21 @@ namespace OnkeyDesktopPet
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 g.InterpolationMode = InterpolationMode.HighQualityBilinear;
                 g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-                if (squash == 0)
-                {
-                    g.CompositingMode = CompositingMode.SourceCopy;
-                    g.DrawImage(current, new Rectangle(0, 0, current.Width, current.Height));
-                }
-                else
+                g.Clear(Color.Transparent);
+                if (squash != 0)
                 {
                     // Bopping: squash everything toward the bottom of his hands, which stay put.
-                    g.Clear(Color.Transparent);
-                    float baseY = currentBottom * PixelScale;
+                    float baseY = app.IdleBottom * PixelScale;
                     g.TranslateTransform(0, baseY);
                     g.ScaleTransform(1, 1 - Squash);
                     g.TranslateTransform(0, -baseY);
-                    g.DrawImage(current, new Rectangle(0, 0, current.Width, current.Height));
                 }
-                g.CompositingMode = CompositingMode.SourceOver;
+                // His arms go behind his body, which bobs up while his hands stay planted.
+                GraphicsState unlifted = g.Save();
+                OnkeyRenderer.ToSprite(g, PixelScale, 0);
+                app.Renderer.DrawArms(g, PixelScale, rig.Shapes(app.Settings.Bool("sketchy")), rig.Poses);
+                g.Restore(unlifted);
+                g.DrawImage(current, new RectangleF(0, -(float)Math.Round(currentBounce * PixelScale), current.Width, current.Height));
                 OnkeyRenderer.ToSprite(g, PixelScale, currentBounce);
                 if (app.Watching)
                     for (int i = 0; i < 2; i++)
@@ -376,7 +386,7 @@ namespace OnkeyDesktopPet
             shownFrame = current; shownAlpha = alpha; shownX = x; shownY = y;
             shownGaze0X = g0x; shownGaze0Y = g0y; shownGaze1X = g1x; shownGaze1Y = g1y;
             shownLid0 = lid0; shownLid1 = lid1; shownMouth = mouth; shownSquash = squash;
-            redraw = false;
+            redraw = false; armsChanged = false;
         }
 
         // Dragging (when "Let me drag Onkey around" is ticked)

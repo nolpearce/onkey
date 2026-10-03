@@ -83,8 +83,8 @@ namespace OnkeyDesktopPet
     public sealed class OnkeyRenderer : IDisposable
     {
         public const int CanvasWidth = 180;
-        public const int CanvasHeight = 132;
-        public const int FrameCount = 40;
+        // Tall enough below him for his arms to hang straight down when he's carried.
+        public const int CanvasHeight = 148;
         public const float SourceWidth = 1774f;
         public const float SourceHeight = 887f;
         public const float PetWidth = 140f;
@@ -94,7 +94,12 @@ namespace OnkeyDesktopPet
         public const float PupilTravel = 13f;
 
         private readonly Bitmap head, blankEyedHead, leftArm, rightArm;
-        private Bitmap scaledHead, scaledBlank, scaledLeft, scaledRight;
+        // His body without his arms (which the rig draws), with and without drawn pupils, and
+        // his two hands from the drawing: [left, right], as ArmSpec.Both.
+        private readonly Bitmap body, blankEyedBody;
+        private readonly Bitmap[] hands = new Bitmap[2];
+        private Bitmap scaledHead, scaledBlank, scaledLeft, scaledRight, scaledBody, scaledBlankBody;
+        private readonly Bitmap[] scaledHands = new Bitmap[2];
         private float preparedScale = -1, preparedK = 1;
         public readonly Cutout[] Pupils = new Cutout[2];
         public readonly Cutout[] EyeInteriors = new Cutout[2];
@@ -135,6 +140,55 @@ namespace OnkeyDesktopPet
                 }
             }
             blankEyedHead = ErasePupils(head);
+            // The body is the drawing minus each arm from just outside his sides.
+            using (GraphicsPath armsPath = new GraphicsPath())
+            using (Bitmap whole = new Bitmap((int)SourceWidth, (int)SourceHeight, PixelFormat.Format32bppPArgb))
+            using (Bitmap wholeBlank = new Bitmap((int)SourceWidth, (int)SourceHeight, PixelFormat.Format32bppPArgb))
+            {
+                armsPath.AddPolygon(ArmSpec.LeftCut);
+                armsPath.AddPolygon(ArmSpec.RightCut);
+                using (Graphics g = Graphics.FromImage(whole))
+                {
+                    g.Clear(Color.Transparent);
+                    g.DrawImageUnscaled(leftArm, 0, 0); g.DrawImageUnscaled(rightArm, 0, 0); g.DrawImageUnscaled(head, 0, 0);
+                }
+                using (Graphics g = Graphics.FromImage(wholeBlank))
+                {
+                    g.Clear(Color.Transparent);
+                    g.DrawImageUnscaled(leftArm, 0, 0); g.DrawImageUnscaled(rightArm, 0, 0); g.DrawImageUnscaled(blankEyedHead, 0, 0);
+                }
+                body = CutAway(whole, armsPath);
+                blankEyedBody = CutAway(wholeBlank, armsPath);
+                for (int i = 0; i < 2; i++)
+                {
+                    // Only what's past the wrist; the rig draws the rest of the arm.
+                    ArmSpec spec = ArmSpec.Both[i];
+                    Rectangle box = spec.HandBox;
+                    int wrist = (int)spec.Wrist.X;
+                    Rectangle keep = spec.Out < 0 ? Rectangle.FromLTRB(box.Left, box.Top, wrist, box.Bottom)
+                        : Rectangle.FromLTRB(wrist, box.Top, box.Right, box.Bottom);
+                    hands[i] = new Bitmap(box.Width, box.Height, PixelFormat.Format32bppPArgb);
+                    using (Graphics g = Graphics.FromImage(hands[i]))
+                    {
+                        g.Clear(Color.Transparent);
+                        g.DrawImage(whole, new Rectangle(keep.X - box.X, keep.Y - box.Y, keep.Width, keep.Height), keep, GraphicsUnit.Pixel);
+                    }
+                }
+            }
+        }
+
+        private static Bitmap CutAway(Bitmap source, GraphicsPath path)
+        {
+            Bitmap part = new Bitmap(source.Width, source.Height, PixelFormat.Format32bppPArgb);
+            using (Graphics g = Graphics.FromImage(part))
+            using (Region keep = new Region(new Rectangle(0, 0, source.Width, source.Height)))
+            {
+                g.Clear(Color.Transparent);
+                keep.Exclude(path);
+                g.SetClip(keep, CombineMode.Replace);
+                g.DrawImageUnscaled(source, 0, 0);
+            }
+            return part;
         }
 
         private static Bitmap Cut(Bitmap source, GraphicsPath path)
@@ -230,8 +284,6 @@ namespace OnkeyDesktopPet
             }
         }
 
-        public static float Bounce(double phase, bool walking) { return walking ? (float)(2.2 * Math.Abs(Math.Sin(phase))) : 0f; }
-
         // Shrinks the layers once per size so each frame is drawn at close to 1:1.
         private void Prepare(float s)
         {
@@ -240,6 +292,8 @@ namespace OnkeyDesktopPet
             float k = SpriteScale * s;
             scaledHead = Shrink(head, k); scaledBlank = Shrink(blankEyedHead, k);
             scaledLeft = Shrink(leftArm, k); scaledRight = Shrink(rightArm, k);
+            scaledBody = Shrink(body, k); scaledBlankBody = Shrink(blankEyedBody, k);
+            for (int i = 0; i < 2; i++) scaledHands[i] = Shrink(hands[i], k);
             preparedScale = s; preparedK = k;
         }
 
@@ -269,9 +323,22 @@ namespace OnkeyDesktopPet
             return new PointF((CanvasWidth - PetWidth) / 2f + sprite.X * SpriteScale, 26f - bounce + sprite.Y * SpriteScale);
         }
 
-        public Bitmap Render(double phase, bool walking, float s, bool blankEyes)
+        // Onkey as drawn, arms and all, for icons and for measuring how much room he takes.
+        public Bitmap Render(float s, bool blankEyes)
         {
             Prepare(s);
+            return Draw(s, scaledLeft, scaledRight, blankEyes ? scaledBlank : scaledHead);
+        }
+
+        // Just his body: on screen the rig draws his arms around it.
+        public Bitmap RenderBody(float s, bool blankEyes)
+        {
+            Prepare(s);
+            return Draw(s, blankEyes ? scaledBlankBody : scaledBody);
+        }
+
+        private Bitmap Draw(float s, params Bitmap[] layers)
+        {
             Bitmap result = new Bitmap((int)Math.Round(CanvasWidth * s), (int)Math.Round(CanvasHeight * s), PixelFormat.Format32bppPArgb);
             using (Graphics g = Graphics.FromImage(result))
             {
@@ -279,45 +346,46 @@ namespace OnkeyDesktopPet
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 g.InterpolationMode = InterpolationMode.HighQualityBilinear;
                 g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-                ToSprite(g, s, Bounce(phase, walking));
-                if (walking)
-                {
-                    // Alternating planted and lifted hands propel the head forward.
-                    float swing = (float)(18 * Math.Sin(phase));
-                    DrawArm(g, scaledLeft, new PointF(633, 808), -16f + swing, preparedK);
-                    DrawArm(g, scaledRight, new PointF(1147, 808), 16f + swing, preparedK);
-                    // Cover each rotating joint with a small patch of matching arm colour.
-                    using (Brush joint = new SolidBrush(Color.FromArgb(157, 87, 47)))
-                    {
-                        g.FillEllipse(joint, 612, 782, 60, 47);
-                        g.FillEllipse(joint, 1112, 782, 60, 47);
-                    }
-                }
-                else
-                {
-                    // At rest his arms lie flat and level, just as they're drawn.
-                    DrawLayer(g, scaledLeft, preparedK);
-                    DrawLayer(g, scaledRight, preparedK);
-                }
-                DrawLayer(g, blankEyes ? scaledBlank : scaledHead, preparedK);
+                ToSprite(g, s, 0);
+                foreach (Bitmap layer in layers) DrawLayer(g, layer, preparedK);
             }
             return result;
+        }
+
+        private static readonly Color ArmColor = Color.FromArgb(164, 85, 49);
+        private static readonly Color InkColor = Color.FromArgb(24, 9, 4);
+        private static readonly Color MarkColor = Color.FromArgb(115, 40, 5);
+
+        // Draws the rig's arms, in sprite pixels (g already set up with ToSprite at scale s).
+        public void DrawArms(Graphics g, float s, ArmShape[] shapes, ArmPose[] poses)
+        {
+            Prepare(s);
+            using (Brush fill = new SolidBrush(ArmColor))
+            using (Brush ink = new SolidBrush(InkColor))
+            using (Pen mark = new Pen(MarkColor, 7))
+            {
+                mark.StartCap = LineCap.Round; mark.EndCap = LineCap.Round;
+                for (int i = 0; i < shapes.Length; i++)
+                {
+                    g.FillPolygon(fill, shapes[i].Fill);
+                    foreach (PointF[] line in shapes[i].Ink) g.FillPolygon(ink, line);
+                    g.DrawLine(mark, shapes[i].MarkFrom, shapes[i].MarkTo);
+                    // The hand turns about the wrist, from how it lies in the drawing.
+                    ArmSpec spec = ArmSpec.Both[i];
+                    GraphicsState state = g.Save();
+                    g.TranslateTransform((float)poses[i].X, (float)poses[i].Y);
+                    g.RotateTransform((float)((poses[i].Angle - spec.RestAngle) * 180 / Math.PI));
+                    g.TranslateTransform(spec.HandBox.X - spec.Wrist.X, spec.HandBox.Y - spec.Wrist.Y);
+                    DrawLayer(g, scaledHands[i], preparedK);
+                    g.Restore(state);
+                }
+            }
         }
 
         // Draws a layer shrunk by k back at sprite-pixel coordinates (so at about 1:1 on screen).
         private static void DrawLayer(Graphics g, Bitmap layer, float k)
         {
             g.DrawImage(layer, new RectangleF(0, 0, layer.Width / k, layer.Height / k));
-        }
-
-        private static void DrawArm(Graphics g, Bitmap arm, PointF pivot, float angle, float k)
-        {
-            GraphicsState state = g.Save();
-            g.TranslateTransform(pivot.X, pivot.Y);
-            g.RotateTransform(angle);
-            g.TranslateTransform(-pivot.X, -pivot.Y);
-            DrawLayer(g, arm, k);
-            g.Restore(state);
         }
 
         // Opaque area of a frame, in canvas points.
@@ -340,8 +408,10 @@ namespace OnkeyDesktopPet
 
         private void DisposeScaled()
         {
-            foreach (Bitmap b in new Bitmap[] { scaledHead, scaledBlank, scaledLeft, scaledRight }) if (b != null) b.Dispose();
-            scaledHead = scaledBlank = scaledLeft = scaledRight = null;
+            foreach (Bitmap b in new Bitmap[] { scaledHead, scaledBlank, scaledLeft, scaledRight, scaledBody, scaledBlankBody, scaledHands[0], scaledHands[1] })
+                if (b != null) b.Dispose();
+            scaledHead = scaledBlank = scaledLeft = scaledRight = scaledBody = scaledBlankBody = null;
+            scaledHands[0] = scaledHands[1] = null;
             preparedScale = -1;
         }
 
@@ -349,6 +419,7 @@ namespace OnkeyDesktopPet
         {
             DisposeScaled();
             head.Dispose(); blankEyedHead.Dispose(); leftArm.Dispose(); rightArm.Dispose();
+            body.Dispose(); blankEyedBody.Dispose(); hands[0].Dispose(); hands[1].Dispose();
             foreach (Cutout c in Pupils) if (c != null) c.Image.Dispose();
             foreach (Cutout c in EyeInteriors) if (c != null) c.Image.Dispose();
         }

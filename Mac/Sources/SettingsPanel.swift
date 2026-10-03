@@ -8,7 +8,7 @@ import SwiftUI
 // and every change takes effect straight away. It closes when you click anywhere else.
 // The Windows version in Windows/Source/SettingsPanel.cs looks the same.
 final class SettingsPanel {
-    static let size = CGSize(width: 380, height: 566)
+    static let size = CGSize(width: 380, height: 616)
     private let panel: Panel
     private let model: SettingsModel
     private var clickMonitor: Any?
@@ -556,6 +556,7 @@ struct MovesPage: View {
             StackedRow(label: "Walking speed", caption: speed < 30 ? "a slow stroll" : speed < 60 ? "normal" : speed < 120 ? "fast" : "zoomies!") {
                 VineSlider("Walking speed", value: speed, range: 10...200, spoken: "\(Int(speed))") { model.set(Key.speed, $0.rounded()) }
             }
+            InlineRow(label: "Floppy arms", caption: "they dangle when you carry him") { LeafSwitch(isOn: model.binding(Key.floppyArms), label: "Floppy arms") }
             SignButton(title: "Bring Onkey to this screen") { model.app.bringHere() }
         }
     }
@@ -623,6 +624,7 @@ struct LookPage: View {
             }
             InlineRow(label: "Watch my cursor", caption: "his eyes follow the mouse") { LeafSwitch(isOn: model.binding(Key.watchCursor), label: "Watch my cursor") }
             InlineRow(label: "Blink", caption: "now and then") { LeafSwitch(isOn: model.binding(Key.blink), label: "Blink") }
+            InlineRow(label: "Sketchy arms", caption: "lines wiggle like a drawing") { LeafSwitch(isOn: model.binding(Key.sketchy), label: "Sketchy arms") }
         }
     }
 }

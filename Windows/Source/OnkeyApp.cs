@@ -25,11 +25,9 @@ namespace OnkeyDesktopPet
         public readonly Settings Settings = new Settings();
         public readonly OnkeyRenderer Renderer;
         public readonly OnkeySound Sound;
-        public Bitmap[] Frames = new Bitmap[0];
-        public float[] FrameBounce = new float[0];
-        // The lowest opaque row of each frame (points, unscaled): where his hands end.
-        public float[] FrameBottom = new float[0];
+        // The lowest opaque row of him at rest (points, unscaled): where his hands end.
         public float IdleBottom = OnkeyRenderer.CanvasHeight;
+        // His body without arms, as shown; the rig draws his arms around it.
         public Bitmap Idle;
         public RectangleF PetBounds = new RectangleF(0, 0, OnkeyRenderer.CanvasWidth, OnkeyRenderer.CanvasHeight);
         // Seconds Onkey has been awake; stops while paused.
@@ -179,29 +177,13 @@ namespace OnkeyDesktopPet
         public void RenderFrames()
         {
             float s = PixelScale;
-            bool blank = Watching;
-            Bitmap[] rendered = new Bitmap[OnkeyRenderer.FrameCount];
-            float[] bounce = new float[OnkeyRenderer.FrameCount];
-            float[] bottom = new float[OnkeyRenderer.FrameCount];
-            RectangleF bounds = RectangleF.Empty;
-            for (int i = 0; i < rendered.Length; i++)
-            {
-                double p = i * 2 * Math.PI / rendered.Length;
-                rendered[i] = Renderer.Render(p, true, s, blank);
-                bounce[i] = OnkeyRenderer.Bounce(p, true);
-                RectangleF b = OnkeyRenderer.OpaqueBounds(rendered[i], s);
-                bottom[i] = b.Bottom;
-                bounds = bounds.IsEmpty ? b : RectangleF.Union(bounds, b);
-            }
-            Bitmap still = Renderer.Render(0, false, s, blank);
-            RectangleF stillBounds = OnkeyRenderer.OpaqueBounds(still, s);
-            bounds = RectangleF.Union(bounds, stillBounds);
-            Bitmap[] oldFrames = Frames;
+            RectangleF stillBounds;
+            using (Bitmap still = Renderer.Render(s, false)) stillBounds = OnkeyRenderer.OpaqueBounds(still, s);
             Bitmap oldIdle = Idle;
-            Frames = rendered; FrameBounce = bounce; FrameBottom = bottom; Idle = still; IdleBottom = stillBounds.Bottom;
-            PetBounds = bounds;
+            Idle = Renderer.RenderBody(s, Watching);
+            IdleBottom = stillBounds.Bottom;
+            PetBounds = stillBounds;
             foreach (PetForm pet in pets) pet.FramesChanged();
-            foreach (Bitmap f in oldFrames) f.Dispose();
             if (oldIdle != null) oldIdle.Dispose();
         }
 
@@ -213,7 +195,7 @@ namespace OnkeyDesktopPet
         // Onkey's head, cropped from the top of his opaque area, on a square of the given size.
         public Bitmap RenderHead(int size)
         {
-            using (Bitmap face = Renderer.Render(0, false, Math.Max(1, size / 32f), false))
+            using (Bitmap face = Renderer.Render(Math.Max(1, size / 32f), false))
             {
                 Bitmap icon = new Bitmap(size, size, PixelFormat.Format32bppPArgb);
                 RectangleF b = OnkeyRenderer.OpaqueBounds(face, 1);   // In pixels.
@@ -315,6 +297,9 @@ namespace OnkeyDesktopPet
                 case "watchCursor":
                     RenderFrames();
                     break;
+                case "sketchy":
+                    foreach (PetForm pet in pets) pet.FramesChanged();
+                    break;
                 case "opacity": case "layer": case "draggable": case "overFullScreen":
                     foreach (PetForm pet in pets) pet.ApplyAppearance();
                     break;
@@ -372,6 +357,7 @@ namespace OnkeyDesktopPet
                 try
                 {
                     if (!Paused && !pet.Dragging) pet.Walk(dt);
+                    pet.UpdateArms(dt);
                     pet.UpdateFace(now, dt);
                     pet.Squash = squash;
                     pet.Present();
@@ -608,7 +594,6 @@ namespace OnkeyDesktopPet
             Safely("stopping listening", listener.Dispose);
             Safely("freeing his pictures", delegate
             {
-                foreach (Bitmap f in Frames) f.Dispose();
                 if (Idle != null) Idle.Dispose();
                 Renderer.Dispose();
             });
