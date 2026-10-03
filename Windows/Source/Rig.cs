@@ -213,6 +213,8 @@ namespace OnkeyDesktopPet
     {
         private const double Gravity = 15000;   // Sprite pixels per second², for a swing of about a second.
         private const double Hand = 200;        // Wrist to fingertips.
+        private const double Above = 40;        // How far above his shoulder a wrist can go.
+        private const double MaxBend = 0.8;     // How far a wrist bends either way (radians, about 45°).
         // The lowest the fingertips can go, below the canvas's top (sprite pixels).
         private const double Bottom = (OnkeyRenderer.CanvasHeight - 26) / OnkeyRenderer.SpriteScale - 90;
         private double wx, wy, wbx, wby, tx, ty, tbx, tby;
@@ -242,19 +244,48 @@ namespace OnkeyDesktopPet
                 // The arm stretches a little but never folds right up, and his hands don't cross.
                 double limit = ox + 887 + spec.Out * 110;
                 if (spec.Out < 0 ? wx > limit : wx < limit) wx = limit;
+                // Nor do they go up behind him, where they'd stick: out to his side they go.
+                Clear(spec, ox, oy, ref wx, wy);
+                Clear(spec, ox, oy, ref tx, ty);
                 // And they stay inside his window.
                 wy = Math.Min(wy, oy + Bottom - Hand); ty = Math.Min(ty, oy + Bottom);
                 double dx = wx - rx, dy = wy - ry;
                 double d = Math.Max(1e-6, Math.Sqrt(dx * dx + dy * dy));
-                double reach = Math.Min(Math.Max(d, 0.75 * spec.Length), 1.08 * spec.Length);
+                double reach = Math.Min(Math.Max(d, 0.7 * spec.Length), 1.08 * spec.Length);
                 wx = rx + dx / d * reach; wy = ry + dy / d * reach;
+                // His hands never fly up past his shoulders, where the arm would have to kink.
+                if (wy < ry - Above)
+                {
+                    wy = ry - Above;
+                    dx = wx - rx; dy = wy - ry; d = Math.Max(1e-6, Math.Sqrt(dx * dx + dy * dy));
+                }
                 // The hand stays the same size, and his wrist gently lines it up with the arm.
                 double wantX = wx + dx / d * Hand, wantY = wy + dy / d * Hand;
                 tx += (wantX - tx) * 0.08; ty += (wantY - ty) * 0.08;
                 double hx = tx - wx, hy = ty - wy;
                 double h = Math.Max(1e-6, Math.Sqrt(hx * hx + hy * hy));
-                tx = wx + hx / h * Hand; ty = wy + hy / h * Hand;
+                hx /= h; hy /= h;
+                // And his wrist only bends so far.
+                double ux = dx / d, uy = dy / d;
+                double bend = Math.Atan2(ux * hy - uy * hx, ux * hx + uy * hy);
+                if (Math.Abs(bend) > MaxBend)
+                {
+                    double a = Math.Atan2(uy, ux) + Math.Sign(bend) * MaxBend;
+                    hx = Math.Cos(a); hy = Math.Sin(a);
+                }
+                // Fingers hang rather than point at the sky.
+                if (hy < -0.3) { hy = -0.3; hx = Math.Sign(hx == 0 ? spec.Out : hx) * Math.Sqrt(1 - hy * hy); }
+                tx = wx + hx * Hand; ty = wy + hy * Hand;
             }
+        }
+
+        // His body, which hands can't hide behind (sprite pixels, from the canvas's top-left).
+        private const double BodyLeft = 580, BodyRight = 1176, BodyBottom = 870;
+
+        private static void Clear(ArmSpec spec, double ox, double oy, ref double x, double y)
+        {
+            if (y - oy >= BodyBottom || x - ox <= BodyLeft || x - ox >= BodyRight) return;
+            x = ox + (spec.Out < 0 ? BodyLeft : BodyRight);
         }
 
         public ArmPose Pose(double ox, double oy) { return new ArmPose(wx - ox, wy - oy, Math.Atan2(ty - wy, tx - wx)); }
