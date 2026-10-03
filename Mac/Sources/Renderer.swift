@@ -40,10 +40,11 @@ struct Cutout {
 }
 
 final class OnkeyRenderer {
-    static let canvas = CGSize(width: 180, height: 132)
-    static let frameCount = 40
+    // Tall enough below him for his arms to hang straight down when he's carried.
+    static let canvas = CGSize(width: 180, height: 148)
     private static let source = CGSize(width: 1774, height: 887)
     private static let petWidth: CGFloat = 140
+    static let spriteScale = Double(petWidth / source.width)   // Canvas points per sprite pixel.
     // The moving pupils are the original drawn pupils shrunk slightly to leave
     // room to look around. Travel is in sprite pixels.
     static let pupilScale: CGFloat = 0.86
@@ -51,6 +52,10 @@ final class OnkeyRenderer {
     private let head, leftArm, rightArm: CGImage
     // The head with its drawn pupils painted white, and the pupils cut out of it.
     private let blankEyedHead: CGImage
+    // His body without his arms (which the rig draws), with and without drawn pupils,
+    // and his two hands from the drawing: [left, right], as ArmSpec.both.
+    private let body, blankEyedBody: CGImage
+    let hands: [CGImage]
     let pupils: [Cutout]
     // The area inside each eye's outline, and the skin colour just above the eyes.
     let eyeInteriors: [Cutout]
@@ -82,6 +87,32 @@ final class OnkeyRenderer {
         guard let eyes = Self.erasePupils(h) else { return nil }
         blankEyedHead = eyes.head; pupils = eyes.pupils
         eyeInteriors = eyes.interiors; lidColor = eyes.lidColor
+        // The body is the drawing minus each arm from just outside his sides.
+        let bodyPath = CGMutablePath()
+        bodyPath.addRect(CGRect(origin: .zero, size: Self.source))
+        bodyPath.addLines(between: ArmSpec.leftCut); bodyPath.closeSubpath()
+        bodyPath.addLines(between: ArmSpec.rightCut); bodyPath.closeSubpath()
+        guard let wholeBlank = Self.compose([blankEyedHead, l, r]),
+              let b = Self.cut(sprite, bodyPath, evenOdd: true),
+              let bb = Self.cut(wholeBlank, bodyPath, evenOdd: true) else { return nil }
+        body = b; blankEyedBody = bb
+        var hands: [CGImage] = []
+        for spec in ArmSpec.both {
+            // Only what's past the wrist; the rig draws the rest of the arm.
+            let box = spec.handBox
+            let keep = spec.out < 0 ? CGRect(x: box.minX, y: box.minY, width: spec.wrist.x - box.minX, height: box.height)
+                : CGRect(x: spec.wrist.x, y: box.minY, width: box.maxX - spec.wrist.x, height: box.height)
+            guard let hand = Self.cut(sprite, CGPath(rect: keep, transform: nil), evenOdd: false)?.cropping(to: box)
+            else { return nil }
+            hands.append(hand)
+        }
+        self.hands = hands
+    }
+
+    private static func compose(_ layers: [CGImage]) -> CGImage? {
+        guard let ctx = flippedContext(width: Int(source.width), height: Int(source.height)) else { return nil }
+        for layer in layers { drawUpright(ctx, layer, in: CGRect(origin: .zero, size: source)) }
+        return ctx.makeImage()
     }
 
     // A bitmap context whose coordinates run y-down, matching the GDI+ maths.
@@ -184,42 +215,32 @@ final class OnkeyRenderer {
         return CGPoint(x: (canvas.width - petWidth) / 2 + p.x * scale, y: 26 - bounce + p.y * scale)
     }
 
-    static func bounce(phase: Double, walking: Bool) -> CGFloat { walking ? 2.2 * abs(sin(phase)) : 0 }
+    // Onkey as drawn, arms and all, for icons and for measuring how much room he takes.
+    func render(pixelsPerPoint s: CGFloat, blankEyes: Bool = false) -> RenderedFrame? {
+        draw(pixelsPerPoint: s, layers: [leftArm, rightArm, blankEyes ? blankEyedHead : head])
+    }
 
-    func render(phase: Double, walking: Bool, pixelsPerPoint s: CGFloat, blankEyes: Bool = false) -> RenderedFrame? {
+    // Just his body: on screen the rig draws his arms around it.
+    func renderBody(pixelsPerPoint s: CGFloat, blankEyes: Bool = false) -> RenderedFrame? {
+        draw(pixelsPerPoint: s, layers: [blankEyes ? blankEyedBody : body])
+    }
+
+    private func draw(pixelsPerPoint s: CGFloat, layers: [CGImage]) -> RenderedFrame? {
         let w = Int((Self.canvas.width * s).rounded()), h = Int((Self.canvas.height * s).rounded())
         guard let ctx = Self.flippedContext(width: w, height: h) else { return nil }
         ctx.scaleBy(x: s, y: s)
         let scale = Self.petWidth / Self.source.width
-        let bounce = Self.bounce(phase: phase, walking: walking)
-        ctx.translateBy(x: (Self.canvas.width - Self.petWidth) / 2, y: 26 - bounce)
+        ctx.translateBy(x: (Self.canvas.width - Self.petWidth) / 2, y: 26)
         ctx.scaleBy(x: scale, y: scale)
-        if walking {
-            // Alternating planted and lifted hands propel the head forward.
-            let swing = 18 * sin(phase)
-            drawArm(ctx, leftArm, pivot: CGPoint(x: 633, y: 808), degrees: -16 + swing)
-            drawArm(ctx, rightArm, pivot: CGPoint(x: 1147, y: 808), degrees: 16 + swing)
-            // Cover each rotating joint with a small patch of matching arm colour.
-            ctx.setFillColor(red: 157 / 255, green: 87 / 255, blue: 47 / 255, alpha: 1)
-            ctx.fillEllipse(in: CGRect(x: 612, y: 782, width: 60, height: 47))
-            ctx.fillEllipse(in: CGRect(x: 1112, y: 782, width: 60, height: 47))
-        } else {
-            // At rest his arms lie flat and level, just as they're drawn.
-            Self.drawUpright(ctx, leftArm, in: CGRect(origin: .zero, size: Self.source))
-            Self.drawUpright(ctx, rightArm, in: CGRect(origin: .zero, size: Self.source))
-        }
-        Self.drawUpright(ctx, blankEyes ? blankEyedHead : head, in: CGRect(origin: .zero, size: Self.source))
+        for layer in layers { Self.drawUpright(ctx, layer, in: CGRect(origin: .zero, size: Self.source)) }
         guard let image = ctx.makeImage() else { return nil }
         return RenderedFrame(image: image, opaqueBounds: Self.opaqueBounds(ctx, w, h, s))
     }
 
-    private func drawArm(_ ctx: CGContext, _ arm: CGImage, pivot: CGPoint, degrees: Double) {
-        ctx.saveGState()
-        ctx.translateBy(x: pivot.x, y: pivot.y)
-        ctx.rotate(by: degrees * .pi / 180)
-        ctx.translateBy(x: -pivot.x, y: -pivot.y)
-        Self.drawUpright(ctx, arm, in: CGRect(origin: .zero, size: Self.source))
-        ctx.restoreGState()
+    // Sprite pixels (y-down) to view points (y-up) in a view of the canvas at `size`.
+    static func spriteToView(size: CGFloat) -> CGAffineTransform {
+        let k = petWidth / source.width * size
+        return CGAffineTransform(a: k, b: 0, c: 0, d: -k, tx: (canvas.width - petWidth) / 2 * size, ty: (canvas.height - 26) * size)
     }
 
     // Bitmap memory is stored top row first, so rows here are already y-down.

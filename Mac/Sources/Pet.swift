@@ -8,11 +8,14 @@ final class Pet {
     let view: PetView
     var area: NSRect
     var px: Double, py: Double
-    private var targetX = 0.0, targetY = 0.0, phase = 0.0
+    private var targetX = 0.0, targetY = 0.0
     private var restUntil = 0.0, nextSound = 0.0
     private(set) var dragging = false
     private var shown: CGImage?
     private var shownBounce: CGFloat = 0
+    // His arms, and whether they need drawing again whatever the rig says (e.g. after a resize).
+    private let rig = ArmRig()
+    private var armsStale = true
     private var shownOrigin: NSPoint?
     // What the eyes and mouth last showed, so unchanged ones aren't redrawn every tick.
     private var shownPupils: [CGPoint]?
@@ -103,6 +106,30 @@ final class Pet {
 
     func framesChanged() { shown = nil; forgetShown(); present(app.idle) }
 
+    // MARK: Arms
+
+    // Where the canvas's top-left is in "world" sprite pixels (y-down), so carrying him
+    // swings his arms.
+    private var worldOrigin: CGPoint {
+        let k = Double(size) * OnkeyRenderer.spriteScale
+        return CGPoint(x: px / k, y: -(py + Double(windowSize.height)) / k)
+    }
+
+    func updateArms(dt: Double) {
+        let prefs = app.prefs
+        let changed = rig.update(dt: dt, origin: worldOrigin, carried: dragging, floppy: prefs.floppyArms,
+                                 sketchy: prefs.sketchy)
+        guard changed || armsStale else { return }
+        armsStale = false
+        shownBounce = CGFloat(rig.bounce)
+        view.setBodyLift(shownBounce * size)
+        let k = size * CGFloat(OnkeyRenderer.spriteScale)
+        view.showArms(rig.shapes(sketchy: prefs.sketchy), poses: rig.poses, hands: app.renderer.hands,
+                      map: OnkeyRenderer.spriteToView(size: size), pointsPerPixel: k, contentsScale: 1 / k)
+        // The eyes, lids and mouth bob with his head.
+        shownPupils = nil; lidsShown = true; mouthShown = true
+    }
+
     // Squashes him for the beat (0 normal, 0.15 is 15% shorter).
     func bop(_ squash: CGFloat) {
         if abs(squash - shownSquash) < 0.0005 { return }
@@ -172,24 +199,20 @@ final class Pet {
         let step = min(distance, speed * dt)
         px += step * dx / distance
         py += step * dy / distance
-        // Faster walking means faster arms, so he never looks like he's skating.
-        let strideRate: Double = 1.15 * speed / (42 * Double(size))
-        phase = (phase + dt * 2 * Double.pi * strideRate).truncatingRemainder(dividingBy: 2 * Double.pi)
-        let frames = app.frames
-        let index = Int(phase / (2 * .pi) * Double(frames.count)) % frames.count
-        present(frames[index], bounce: OnkeyRenderer.bounce(phase: Double(index) / Double(frames.count) * 2 * .pi,
-                                                            walking: true), bottom: app.frameBottoms[index])
+        // His hands step as far as he goes, so he never looks like he's skating.
+        let k = Double(size) * OnkeyRenderer.spriteScale
+        rig.walked(dx: step * dx / distance / k, distance: step / k)
+        present(app.idle)
     }
 
-    // bottom: the frame's lowest opaque row (canvas points, y-down); nil for the idle frame.
-    func present(_ image: CGImage, bounce: CGFloat = 0, bottom: CGFloat? = nil) {
+    func present(_ image: CGImage) {
         if shown !== image {
             view.show(image, scale: app.pixelScale / size)
-            // The bottom of his hands in this frame, which stays put when he bops.
-            view.setBase((OnkeyRenderer.canvas.height - (bottom ?? app.idleBottom)) * size)
+            // The bottom of his hands, which stays put when he bops.
+            view.setBase((OnkeyRenderer.canvas.height - app.idleBottom) * size)
             shown = image
+            armsStale = true
         }
-        shownBounce = bounce
         let origin = NSPoint(x: px.rounded(), y: py.rounded())
         if origin != shownOrigin { window.setFrameOrigin(origin); shownOrigin = origin }
     }

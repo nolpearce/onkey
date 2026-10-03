@@ -8,12 +8,18 @@ final class PetView: NSView {
     private var grabMouse = NSPoint.zero, grabOrigin = NSPoint.zero, moved = false
     // Everything Onkey is drawn with (body, pupils, lids, mouth), so a bop squashes it all.
     private let content = CALayer()
+    // His arms (drawn by the rig) behind his body, which bobs while he walks.
+    private let arms = CALayer()
+    private let body = CALayer()
+    private var bodyLift: CGFloat = 0
     private var baseY: CGFloat = 0
 
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
-        content.contentsGravity = .resize
+        body.contentsGravity = .resize
+        content.addSublayer(arms)
+        content.addSublayer(body)
         layer?.addSublayer(content)
         layout()
     }
@@ -25,14 +31,76 @@ final class PetView: NSView {
         CATransaction.setDisableActions(true)
         content.transform = CATransform3DIdentity
         content.frame = bounds
+        arms.frame = bounds
+        body.frame = bounds.offsetBy(dx: 0, dy: bodyLift)
         setBase(baseY)
         CATransaction.commit()
     }
 
     func show(_ image: CGImage, scale: CGFloat) {
-        content.contentsScale = scale
-        content.contents = image
+        body.contentsScale = scale
+        body.contents = image
     }
+
+    // Lifts his body (view points) while his hands stay planted.
+    func setBodyLift(_ lift: CGFloat) {
+        bodyLift = lift
+        body.frame = bounds.offsetBy(dx: 0, dy: lift)
+    }
+
+    // One set of layers per arm: the brown inside, its ink outline, the hair mark, and the hand.
+    private var armLayers: [(fill: CAShapeLayer, ink: CAShapeLayer, mark: CAShapeLayer, hand: CALayer)] = []
+
+    // shapes and poses are in sprite pixels (y-down); map takes them to view points.
+    func showArms(_ shapes: [ArmShape], poses: [ArmPose], hands: [CGImage], map: CGAffineTransform,
+                  pointsPerPixel k: CGFloat, contentsScale: CGFloat) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
+        while armLayers.count < shapes.count {
+            let fill = CAShapeLayer(), ink = CAShapeLayer(), mark = CAShapeLayer(), hand = CALayer()
+            fill.fillColor = Self.armColor
+            ink.fillColor = Self.inkColor
+            mark.fillColor = nil
+            mark.strokeColor = Self.markColor
+            mark.lineCap = .round
+            hand.contentsGravity = .resize
+            hand.minificationFilter = .trilinear
+            for l in [fill, ink, mark, hand] { arms.addSublayer(l) }
+            armLayers.append((fill, ink, mark, hand))
+        }
+        let t = map
+        for (i, layers) in armLayers.enumerated() where i < shapes.count {
+            let shape = shapes[i], spec = ArmSpec.both[i]
+            let fill = CGMutablePath()
+            fill.addLines(between: shape.fill, transform: t)
+            fill.closeSubpath()
+            layers.fill.path = fill
+            let ink = CGMutablePath()
+            for line in shape.ink { ink.addLines(between: line, transform: t); ink.closeSubpath() }
+            layers.ink.path = ink
+            let mark = CGMutablePath()
+            mark.move(to: shape.markFrom, transform: t)
+            mark.addLine(to: shape.markTo, transform: t)
+            layers.mark.path = mark
+            layers.mark.lineWidth = 7 * k
+            // The hand turns about the wrist, from how it lies in the drawing.
+            let box = spec.handBox
+            let hand = layers.hand
+            hand.contents = hands[i]
+            hand.contentsScale = contentsScale
+            hand.transform = CATransform3DIdentity
+            hand.bounds = CGRect(x: 0, y: 0, width: box.width * k, height: box.height * k)
+            hand.anchorPoint = CGPoint(x: (spec.wrist.x - box.minX) / box.width, y: (box.maxY - spec.wrist.y) / box.height)
+            hand.position = poses[i].wrist.applying(t)
+            // Layer y runs upward, so turns go the other way.
+            hand.transform = CATransform3DMakeRotation(-CGFloat(poses[i].angle - spec.restAngle), 0, 0, 1)
+        }
+    }
+
+    static let armColor = CGColor(srgbRed: 164 / 255, green: 85 / 255, blue: 49 / 255, alpha: 1)
+    static let inkColor = CGColor(srgbRed: 24 / 255, green: 9 / 255, blue: 4 / 255, alpha: 1)
+    static let markColor = CGColor(srgbRed: 115 / 255, green: 40 / 255, blue: 5 / 255, alpha: 1)
 
     // Where his base is (view points up from the bottom): squashing pivots there, so his
     // hands stay planted and the top of his head comes down.

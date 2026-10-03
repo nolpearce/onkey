@@ -7,6 +7,7 @@ enum Key {
     static let watchCursor = "watchCursor", blink = "blink"
     static let count = "count", dance = "dance"
     static let checkUpdates = "checkUpdates"
+    static let floppyArms = "floppyArms", sketchy = "sketchy"
     static let savedX = "savedX", savedY = "savedY"
 }
 
@@ -16,6 +17,7 @@ struct Prefs {
     var zone = "anywhere", chase = 5, speed = 42.0
     var soundOn = true, soundGap = 90.0, volume = 1.0
     var size: CGFloat = 1, watchCursor = true, blink = true, dance = false
+    var floppyArms = true, sketchy = true
 
     init() {}
     init(_ d: UserDefaults) {
@@ -29,5 +31,7 @@ struct Prefs {
         watchCursor = d.bool(forKey: Key.watchCursor)
         blink = d.bool(forKey: Key.blink)
         dance = d.bool(forKey: Key.dance)
+        floppyArms = d.bool(forKey: Key.floppyArms)
+        sketchy = d.bool(forKey: Key.sketchy)
     }
 }
