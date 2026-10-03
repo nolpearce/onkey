@@ -213,6 +213,8 @@ namespace OnkeyDesktopPet
     {
         private const double Gravity = 15000;   // Sprite pixels per second², for a swing of about a second.
         private const double Hand = 200;        // Wrist to fingertips.
+        private const double Above = 40;        // How far above his shoulder a wrist can go.
+        private const double MaxBend = 0.8;     // How far a wrist bends either way (radians, about 45°).
         // The lowest the fingertips can go, below the canvas's top (sprite pixels).
         private const double Bottom = (OnkeyRenderer.CanvasHeight - 26) / OnkeyRenderer.SpriteScale - 90;
         private double wx, wy, wbx, wby, tx, ty, tbx, tby;
@@ -249,14 +251,31 @@ namespace OnkeyDesktopPet
                 wy = Math.Min(wy, oy + Bottom - Hand); ty = Math.Min(ty, oy + Bottom);
                 double dx = wx - rx, dy = wy - ry;
                 double d = Math.Max(1e-6, Math.Sqrt(dx * dx + dy * dy));
-                double reach = Math.Min(Math.Max(d, 0.5 * spec.Length), 1.08 * spec.Length);
+                double reach = Math.Min(Math.Max(d, 0.7 * spec.Length), 1.08 * spec.Length);
                 wx = rx + dx / d * reach; wy = ry + dy / d * reach;
+                // His hands never fly up past his shoulders, where the arm would have to kink.
+                if (wy < ry - Above)
+                {
+                    wy = ry - Above;
+                    dx = wx - rx; dy = wy - ry; d = Math.Max(1e-6, Math.Sqrt(dx * dx + dy * dy));
+                }
                 // The hand stays the same size, and his wrist gently lines it up with the arm.
                 double wantX = wx + dx / d * Hand, wantY = wy + dy / d * Hand;
                 tx += (wantX - tx) * 0.08; ty += (wantY - ty) * 0.08;
                 double hx = tx - wx, hy = ty - wy;
                 double h = Math.Max(1e-6, Math.Sqrt(hx * hx + hy * hy));
-                tx = wx + hx / h * Hand; ty = wy + hy / h * Hand;
+                hx /= h; hy /= h;
+                // And his wrist only bends so far.
+                double ux = dx / d, uy = dy / d;
+                double bend = Math.Atan2(ux * hy - uy * hx, ux * hx + uy * hy);
+                if (Math.Abs(bend) > MaxBend)
+                {
+                    double a = Math.Atan2(uy, ux) + Math.Sign(bend) * MaxBend;
+                    hx = Math.Cos(a); hy = Math.Sin(a);
+                }
+                // Fingers hang rather than point at the sky.
+                if (hy < -0.3) { hy = -0.3; hx = Math.Sign(hx == 0 ? spec.Out : hx) * Math.Sqrt(1 - hy * hy); }
+                tx = wx + hx * Hand; ty = wy + hy * Hand;
             }
         }
 

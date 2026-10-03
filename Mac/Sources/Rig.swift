@@ -168,6 +168,8 @@ enum ArmGeometry {
 private struct Dangle {
     static let gravity = 15000.0   // Sprite pixels per second², for a swing of about a second.
     static let hand = 200.0        // Wrist to fingertips.
+    static let above = 40.0        // How far above his shoulder a wrist can go.
+    static let maxBend = 0.8       // How far a wrist bends either way (radians, about 45°).
     // The lowest the fingertips can go, below the canvas's top (sprite pixels).
     static let bottom = Double(OnkeyRenderer.canvas.height - 26) / OnkeyRenderer.spriteScale - 90
     var wrist = CGPoint.zero, wristBefore = CGPoint.zero
@@ -200,16 +202,31 @@ private struct Dangle {
             // And they stay inside his window.
             wrist.y = min(wrist.y, origin.y + CGFloat(Self.bottom - Self.hand))
             tip.y = min(tip.y, origin.y + CGFloat(Self.bottom))
-            let dx = Double(wrist.x - root.x), dy = Double(wrist.y - root.y)
-            let d = max(1e-6, hypot(dx, dy))
-            let reach = min(max(d, 0.5 * spec.length), 1.08 * spec.length)
+            var dx = Double(wrist.x - root.x), dy = Double(wrist.y - root.y)
+            var d = max(1e-6, hypot(dx, dy))
+            let reach = min(max(d, 0.7 * spec.length), 1.08 * spec.length)
             wrist = CGPoint(x: Double(root.x) + dx / d * reach, y: Double(root.y) + dy / d * reach)
+            // His hands never fly up past his shoulders, where the arm would have to kink.
+            if Double(wrist.y) < Double(root.y) - Self.above {
+                wrist.y = root.y - CGFloat(Self.above)
+                dx = Double(wrist.x - root.x); dy = Double(wrist.y - root.y); d = max(1e-6, hypot(dx, dy))
+            }
             // The hand stays the same size, and his wrist gently lines it up with the arm.
             let want = CGPoint(x: Double(wrist.x) + dx / d * Self.hand, y: Double(wrist.y) + dy / d * Self.hand)
             tip = CGPoint(x: tip.x + (want.x - tip.x) * 0.08, y: tip.y + (want.y - tip.y) * 0.08)
-            let hx = Double(tip.x - wrist.x), hy = Double(tip.y - wrist.y)
+            var hx = Double(tip.x - wrist.x), hy = Double(tip.y - wrist.y)
             let h = max(1e-6, hypot(hx, hy))
-            tip = CGPoint(x: Double(wrist.x) + hx / h * Self.hand, y: Double(wrist.y) + hy / h * Self.hand)
+            hx /= h; hy /= h
+            // And his wrist only bends so far.
+            let ux = dx / d, uy = dy / d
+            let bend = atan2(ux * hy - uy * hx, ux * hx + uy * hy)
+            if abs(bend) > Self.maxBend {
+                let a = atan2(uy, ux) + (bend < 0 ? -Self.maxBend : Self.maxBend)
+                hx = cos(a); hy = sin(a)
+            }
+            // Fingers hang rather than point at the sky.
+            if hy < -0.3 { hy = -0.3; hx = (hx == 0 ? spec.out : (hx < 0 ? -1 : 1)) * (1 - hy * hy).squareRoot() }
+            tip = CGPoint(x: Double(wrist.x) + hx * Self.hand, y: Double(wrist.y) + hy * Self.hand)
         }
     }
 
