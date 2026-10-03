@@ -194,12 +194,15 @@ private struct Dangle {
             // The arm stretches a little but never folds right up, and his hands don't cross.
             let limit = Double(origin.x) + 887 + spec.out * 110
             if spec.out < 0 ? Double(wrist.x) > limit : Double(wrist.x) < limit { wrist.x = CGFloat(limit) }
+            // Nor do they go up behind him, where they'd stick: out to his side they go.
+            Self.clear(spec, origin, &wrist)
+            Self.clear(spec, origin, &tip)
             // And they stay inside his window.
             wrist.y = min(wrist.y, origin.y + CGFloat(Self.bottom - Self.hand))
             tip.y = min(tip.y, origin.y + CGFloat(Self.bottom))
             let dx = Double(wrist.x - root.x), dy = Double(wrist.y - root.y)
             let d = max(1e-6, hypot(dx, dy))
-            let reach = min(max(d, 0.75 * spec.length), 1.08 * spec.length)
+            let reach = min(max(d, 0.5 * spec.length), 1.08 * spec.length)
             wrist = CGPoint(x: Double(root.x) + dx / d * reach, y: Double(root.y) + dy / d * reach)
             // The hand stays the same size, and his wrist gently lines it up with the arm.
             let want = CGPoint(x: Double(wrist.x) + dx / d * Self.hand, y: Double(wrist.y) + dy / d * Self.hand)
@@ -208,6 +211,14 @@ private struct Dangle {
             let h = max(1e-6, hypot(hx, hy))
             tip = CGPoint(x: Double(wrist.x) + hx / h * Self.hand, y: Double(wrist.y) + hy / h * Self.hand)
         }
+    }
+
+    // His body, which hands can't hide behind (sprite pixels, from the canvas's top-left).
+    static let bodyLeft: CGFloat = 580, bodyRight: CGFloat = 1176, bodyBottom: CGFloat = 870
+
+    private static func clear(_ spec: ArmSpec, _ origin: CGPoint, _ p: inout CGPoint) {
+        if p.y - origin.y >= bodyBottom || p.x - origin.x <= bodyLeft || p.x - origin.x >= bodyRight { return }
+        p.x = origin.x + (spec.out < 0 ? bodyLeft : bodyRight)
     }
 
     func pose(origin: CGPoint) -> ArmPose {

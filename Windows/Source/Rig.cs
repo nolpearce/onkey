@@ -242,11 +242,14 @@ namespace OnkeyDesktopPet
                 // The arm stretches a little but never folds right up, and his hands don't cross.
                 double limit = ox + 887 + spec.Out * 110;
                 if (spec.Out < 0 ? wx > limit : wx < limit) wx = limit;
+                // Nor do they go up behind him, where they'd stick: out to his side they go.
+                Clear(spec, ox, oy, ref wx, wy);
+                Clear(spec, ox, oy, ref tx, ty);
                 // And they stay inside his window.
                 wy = Math.Min(wy, oy + Bottom - Hand); ty = Math.Min(ty, oy + Bottom);
                 double dx = wx - rx, dy = wy - ry;
                 double d = Math.Max(1e-6, Math.Sqrt(dx * dx + dy * dy));
-                double reach = Math.Min(Math.Max(d, 0.75 * spec.Length), 1.08 * spec.Length);
+                double reach = Math.Min(Math.Max(d, 0.5 * spec.Length), 1.08 * spec.Length);
                 wx = rx + dx / d * reach; wy = ry + dy / d * reach;
                 // The hand stays the same size, and his wrist gently lines it up with the arm.
                 double wantX = wx + dx / d * Hand, wantY = wy + dy / d * Hand;
@@ -255,6 +258,15 @@ namespace OnkeyDesktopPet
                 double h = Math.Max(1e-6, Math.Sqrt(hx * hx + hy * hy));
                 tx = wx + hx / h * Hand; ty = wy + hy / h * Hand;
             }
+        }
+
+        // His body, which hands can't hide behind (sprite pixels, from the canvas's top-left).
+        private const double BodyLeft = 580, BodyRight = 1176, BodyBottom = 870;
+
+        private static void Clear(ArmSpec spec, double ox, double oy, ref double x, double y)
+        {
+            if (y - oy >= BodyBottom || x - ox <= BodyLeft || x - ox >= BodyRight) return;
+            x = ox + (spec.Out < 0 ? BodyLeft : BodyRight);
         }
 
         public ArmPose Pose(double ox, double oy) { return new ArmPose(wx - ox, wy - oy, Math.Atan2(ty - wy, tx - wx)); }
