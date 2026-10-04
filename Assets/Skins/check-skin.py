@@ -10,7 +10,7 @@ from PIL import Image
 EYES = [(753, 525), (1056, 512)]
 
 
-def flood(px, w, h, seed, radius, accept):
+def flood(px, w, h, seed, radius, accept, by_xy=False):
     seen, stack, found = set(), [seed], []
     while stack:
         x, y = stack.pop()
@@ -19,7 +19,7 @@ def flood(px, w, h, seed, radius, accept):
         if (x, y) in seen:
             continue
         seen.add((x, y))
-        if not accept(px[x, y]):
+        if not accept((x, y) if by_xy else px[x, y]):
             continue
         found.append((x, y))
         stack += [(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)]
@@ -48,11 +48,11 @@ def main():
         # With the pupil painted white, the white must be one patch bounded by a coloured or dark edge.
         dark = set(pupil)
 
-        def light(p, xy=None):
+        def light(p):
             return p[3] > 100 and max(p[:3]) >= 60 and max(p[:3]) - min(p[:3]) < 60
 
-        white = flood(px, w, h, seed, 85, lambda p: True)
-        white = [xy for xy in white if xy in dark or light(px[xy])]
+        # Grown out from the pupil, as the renderers do.
+        white = flood(px, w, h, seed, 85, lambda xy: xy in dark or light(px[xy]), by_xy=True)
         if len(white) - len(pupil) < 300:
             print(f"FAIL {name} eye: not enough white round the pupil"); ok = False
     for x0, x1 in ((620, 680), (1095, 1150)):

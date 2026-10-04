@@ -3,7 +3,8 @@ DRAWING A SKIN FOR ONKEY
 1. Open skin-start.png (1774 x 887) in your drawing app. It has his arms and hands.
 2. Put skin-guides.png on a layer above it, with skin-preview.png as a reference.
 3. Draw the costume on a new layer between them. Anything above the green dashed line is free:
-   head, ears, hat, stem, whatever you like.
+   head, ears, hat, stem, whatever you like, except the two crossed-out red strips beside his hands
+   (left of x 380 and right of x 1394, just above the line), which the app cuts away.
 4. The app needs a few things to stay put so his eyes and arms still move:
    - Eyes: a solid black pupil over each blue +, with white all the way round it, and a coloured
      (not white or grey) edge round the white. The pupils move to follow the mouse; the white stays.

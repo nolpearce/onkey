@@ -64,10 +64,16 @@ def guides():
 
     # Body limits below the ears.
     dashed(d, (0, EAR_LINE), (W, EAR_LINE), green, 3)
+    # The arm cuts also remove these strips beside his ears.
+    for box in ((0, 600, 380, EAR_LINE), (1394, 600, W - 1, 713)):
+        d.rectangle(box, outline=red, width=3)
+        d.line([box[:2], box[2:]], fill=red, width=2)
+    d.text((272, 640), "no drawing", font=small, fill=red)
+    d.text((1400, 606), "no drawing", font=small, fill=red)
     for x in (BODY_LEFT, BODY_RIGHT):
         dashed(d, (x, EAR_LINE), (x, H), green, 4)
     d.text((BODY_LEFT + 10, EAR_LINE + 8), "below the line: body stays between the green lines", font=small, fill=green)
-    d.text((BODY_LEFT + 10, EAR_LINE - 32), "above the line: draw anywhere (ears, hat, stem...)", font=small, fill=green)
+    d.text((BODY_LEFT + 10, EAR_LINE - 32), "above the line: draw anywhere but the crossed red boxes", font=small, fill=green)
 
     # Arm roots his body must cover.
     for box in ROOTS:
