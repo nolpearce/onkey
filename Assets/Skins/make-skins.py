@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-# Draws Onkey's skins in the style of Onkey.png: each skin is a full sprite the same size as Onkey.png,
-# with his arms, hands and ears lifted from it so the arm rig, blinking and moving pupils all still
-# fit. The pictures are checked in, so this only needs running again to change them:
+# Draws Onkey's skins: each skin is a full sprite the same size as Onkey.png, with his arms, hands
+# and ears lifted from it so the arm rig, blinking and moving pupils all still fit. The pictures are
+# checked in, so this only needs running again to change them:
 #
 #   python3 -m pip install pillow
 #   python3 Assets/Skins/make-skins.py
 #
-# Each eye must keep a black pupil inside a white eye, centred on the eye seeds the renderers use
-# ((753, 525) and (1056, 512)), and below y = 703 his body must stay between x = 606 and 1150,
-# where the rig's arms come out (ArmSpec.LeftCut / RightCut in Rig.cs and Rig.swift).
+# Each eye must keep a black pupil fully inside a white eye, centred on the eye seeds the renderers
+# use ((753, 525) and (1056, 512)), with a coloured (not grey) shape around the white. Below y = 703
+# his body is cut away outside the skin's bodyCut x values (Skin.cs / Skin.swift), where the rig's
+# arms come out from under him, and it must cover the arm roots near (640, 805) and (1134, 805).
 import math, os, random
 from PIL import Image, ImageDraw
 
@@ -16,220 +17,210 @@ here = os.path.dirname(os.path.abspath(__file__))
 classic = Image.open(os.path.join(here, "..", "Onkey.png")).convert("RGBA")
 W, H = classic.size
 SS = 2  # drawn this many times bigger, then shrunk, for smooth edges
-
-ink = (26, 6, 3, 255)
 EYES = [(753, 525), (1056, 512)]
 
 
 class Pen:
-    def __init__(self, seed):
+    def __init__(self):
         self.img = Image.new("RGBA", (W * SS, H * SS), (0, 0, 0, 0))
         self.d = ImageDraw.Draw(self.img)
-        self.rng = random.Random(seed)
 
     def p(self, pts):
         return [(x * SS, y * SS) for x, y in pts]
 
-    def shape(self, pts, fill, outline=ink, width=9):
+    def fill(self, pts, color):
+        self.d.polygon(self.p(pts), fill=color)
+
+    def line(self, pts, color, width, closed=False):
         pts = self.p(pts)
-        self.d.polygon(pts, fill=fill)
-        if outline:
-            self.line_px(pts + [pts[0]], outline, width)
-
-    def line(self, pts, color, width):
-        self.line_px(self.p(pts), color, width)
-
-    def line_px(self, pts, color, width):
+        if closed:
+            pts = pts + [pts[0], pts[1]]
         w = max(1, int(width * SS))
         self.d.line(pts, fill=color, width=w, joint="curve")
         r = w / 2
-        for x, y in (pts[0], pts[-1]):
+        ends = [] if closed else [pts[0], pts[-1]]
+        for x, y in ends:
             self.d.ellipse([x - r, y - r, x + r, y + r], fill=color)
 
-    def ellipse(self, cx, cy, rx, ry, fill):
-        self.d.ellipse([(cx - rx) * SS, (cy - ry) * SS, (cx + rx) * SS, (cy + ry) * SS], fill=fill)
+    def shape(self, pts, color, outline, width):
+        self.fill(pts, color)
+        self.line(pts, outline, width, closed=True)
 
     def done(self):
         return self.img.resize((W, H), Image.LANCZOS)
 
 
-def wobble(pts, rng, amount):
+def wobble(pts, seed, amount):
     # A hand's unsteadiness: a slow drift along the line, not per-point noise.
+    rng = random.Random(seed)
     a, b = rng.uniform(0, 6.3), rng.uniform(0, 6.3)
+    n = len(pts)
+    return [(x + amount * math.sin(2 * math.pi * 3 * i / n + a), y + amount * math.sin(2 * math.pi * 4 * i / n + b))
+            for i, (x, y) in enumerate(pts)]
+
+
+def bezier(points, steps=24):
+    # Points along a chain of cubic curves: p0, c1, c2, p1, c1, c2, p2, ...
     out = []
-    for i, (x, y) in enumerate(pts):
-        t = i / max(1, len(pts) - 1)
-        out.append((x + amount * math.sin(t * 9 + a), y + amount * math.sin(t * 13 + b)))
+    for k in range(0, len(points) - 1, 3):
+        p0, c1, c2, p1 = points[k:k + 4]
+        for i in range(steps):
+            t = i / steps
+            u = 1 - t
+            out.append((u ** 3 * p0[0] + 3 * u * u * t * c1[0] + 3 * u * t * t * c2[0] + t ** 3 * p1[0],
+                        u ** 3 * p0[1] + 3 * u * u * t * c1[1] + 3 * u * t * t * c2[1] + t ** 3 * p1[1]))
+    out.append(points[-1])
     return out
 
 
-def blob(cx, cy, rx, ry, steps=64, squash=None):
-    # A closed round shape; squash(angle) -> radius factor shapes it.
-    pts = []
-    for i in range(steps):
-        a = 2 * math.pi * i / steps
-        k = squash(a) if squash else 1
-        pts.append((cx + math.cos(a) * rx * k, cy + math.sin(a) * ry * k))
-    return pts
-
-
-def without_body(sprite):
-    # His ears, arms and hands, with the head and body between them cleared away.
-    out = sprite.copy()
-    clear = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    mask = Image.new("L", (W, H), 0)
-    m = ImageDraw.Draw(mask)
-    m.rectangle([605, 0, 1150, H], fill=255)
-    m.rectangle([1150, 0, 1175, 703], fill=255)
-    out.paste(clear, (0, 0), mask)
-    # His right ear reached under the cleared strip beside his head: mirror the ear's next few
-    # columns into it so no hard edge shows past the new head.
-    px = out.load()
-    src = sprite.load()
-    for y in range(430, 716):
-        for x in range(1150, 1176):
-            px[x, y] = src[2352 - x, y]
+def arms_and_ears(left_in, right_in, ear_shift):
+    # His arms and hands from Onkey.png, beyond left_in / right_in (under his new body they're never
+    # seen), and his ears moved out by ear_shift so a wider head doesn't swallow them.
+    out = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    arms = Image.new("L", (W, H), 0)
+    m = ImageDraw.Draw(arms)
+    # The arm outlines the renderers cut his arms out with (Renderer.cs / Renderer.swift).
+    m.polygon([(0, 600), (330, 600), (410, 722), (565, 722), (620, 752), (643, 778), (643, 887), (0, 887)], fill=255)
+    m.polygon([(1137, 762), (1200, 748), (1340, 730), (1440, 620), (1774, 620), (1774, 887), (1137, 887)], fill=255)
+    m.rectangle([left_in, 0, right_in, H], fill=0)
+    out.paste(classic, (0, 0), arms)
+    for box, dx in (((410, 430, 606, 716), -ear_shift), ((1168, 430, 1366, 716), ear_shift)):
+        ear = classic.crop(box)
+        mask = Image.new("L", ear.size, 0)
+        # Leave out the arm below each ear.
+        ImageDraw.Draw(mask).rectangle([0, 0, ear.size[0], ear.size[1]], fill=255)
+        cut = Image.new("L", (W, H), 0)
+        ImageDraw.Draw(cut).polygon([(330, 600), (410, 722), (565, 722), (620, 752), (643, 778), (643, 887), (0, 887), (0, 600)], fill=255)
+        ImageDraw.Draw(cut).polygon([(1137, 762), (1200, 748), (1340, 730), (1440, 620), (1774, 620), (1774, 887), (1137, 887)], fill=255)
+        mask.paste(0, (0, 0), cut.crop(box))
+        layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        layer.paste(ear, (box[0] + dx, box[1]), mask)
+        out.alpha_composite(layer)
     return out
 
 
-# Pumpkin: a carved jack-o'-lantern head with angry eyes and a jagged grin, his monkey ears
-# poking out of the sides, and a curly stem where his tuft was.
+# Pumpkin: a carved jack-o'-lantern head, round and orange, with angry carved eyes, a jagged grin,
+# a curly stem and his monkey ears poking out of the sides. Matches the cartoon it came from: flat
+# colours, brown outlines, a few thin ribs.
+PUMPKIN_CUT = (470, 1330)   # Skin.Pumpkin's bodyCut.
+
+
 def pumpkin():
-    rng = random.Random(31)
-    pen = Pen(31)
-    skin = (236, 132, 38, 255)
-    shade = (205, 102, 26, 255)
-    rib = (184, 86, 22, 255)
-    glow = (250, 168, 70, 255)
-    carved = (122, 60, 26, 255)
-    flesh = (232, 178, 112, 255)
-    stem = (150, 82, 42, 255)
-    stem_dark = (112, 56, 26, 255)
-    cx, top, bottom = 878, 250, 866
+    pen = Pen()
+    orange = (226, 131, 48, 255)
+    rib = (196, 100, 34, 255)
+    line = (96, 44, 20, 255)
+    carved = (146, 86, 50, 255)
+    carved_dark = (118, 64, 34, 255)
+    flesh = (224, 172, 108, 255)
+    flesh_line = (120, 66, 34, 255)
+    white = (252, 250, 246, 255)
+    black = (10, 8, 8, 255)
+    stem = (138, 86, 56, 255)
+    cx, cy, rx = 900, 532, 392
+    top, bottom = 196, 870
 
-    def half_width(y):
-        # Widest across his eyes, tucking in toward the bottom so his arms come out from under him.
-        if y < 480:
-            t = (480 - y) / (480 - top)
-            return 342 * (1 - t ** 1.9) ** 0.5
-        if y < 690:
-            t = (y - 480) / (690 - 480)
-            return 342 - (342 - 270) * (t * t * (3 - 2 * t))
-        if y < bottom - 52:
-            return 270 - 3 * math.sin(math.pi * (y - 690) / (bottom - 52 - 690))
-        t = (y - (bottom - 52)) / 52
-        return 270 - 70 * (1 - math.sqrt(max(0, 1 - t * t)))
+    def edge(a):
+        # Round on top, fuller and flatter underneath like a pumpkin sitting down.
+        x, y = math.cos(a), math.sin(a)
+        if y < 0:
+            n, ry = 2.1, cy - top
+        else:
+            n, ry = 3.0, bottom - cy
+        k = (abs(x) ** n + abs(y) ** n) ** (-1 / n)
+        px, py = cx + x * k * rx, cy + y * k * ry
+        # A little dip where the stem grows.
+        if y < 0 and abs(px - cx) < 120:
+            py += 14 * (1 - abs(px - cx) / 120) ** 2
+        return px, py
 
-    left, right = [], []
-    for i in range(0, 121):
-        y = top + (bottom - top) * i / 120
-        w = half_width(y)
-        # A dip in the top where the stem grows.
-        left.append((cx - w, y))
-        right.append((cx + w, y))
-    outline = left + right[::-1]
-    dip = []
-    for x, y in outline:
-        d = abs(x - cx)
-        if y < 320 and d < 150:
-            y += 16 * (1 - d / 150) ** 2
-        dip.append((x, y))
-    outline = wobble(dip, rng, 2.5)
+    outline = wobble([edge(2 * math.pi * i / 160) for i in range(160)], 3, 2.0)
+    pen.fill(outline, orange)
 
-    # Body, with a darker band down each side and a highlight on the upper left.
-    pen.shape(outline, skin, outline=None)
-    for side in (-1, 1):
-        band = []
-        for i in range(0, 61):
-            y = top + 40 + (bottom - top - 70) * i / 60
-            w = half_width(y)
-            band.append((cx + side * w * 0.99, y))
-        for i in range(60, -1, -1):
-            y = top + 40 + (bottom - top - 70) * i / 60
-            w = half_width(y)
-            band.append((cx + side * w * 0.80, y))
-        pen.shape(band, shade, outline=None)
-    pen.shape(blob(728, 352, 62, 32), glow, outline=None)
-
-    # Ribs: soft curved strokes following his shape, broken here and there like pencil.
-    for f in (-0.72, -0.4, -0.12, 0.16, 0.44, 0.74):
-        y0, y1 = top + 34 + abs(f) * 60, bottom - 26 - abs(f) * 30
+    # Ribs: thin curved strokes, broken like pencil, following his roundness.
+    rng = random.Random(7)
+    for f in (-0.8, -0.52, -0.2, 0.18, 0.5, 0.8):
         pts = []
-        for i in range(0, 41):
-            y = y0 + (y1 - y0) * i / 40
-            pts.append((cx + f * half_width(y) * 0.98 + 6 * math.sin(i * 0.4 + f * 5), y))
-        pieces = [(0, 14), (17, 29), (32, 40)] if rng.random() < 0.6 else [(0, 22), (25, 40)]
-        for a, b in pieces:
-            pen.line(pts[a:b + 1], rib, 6)
-    pen.line(outline + [outline[0]], ink, 9)
+        for i in range(31):
+            t = i / 30
+            y = top + 40 + (bottom - top - 80) * t
+            yy = (y - cy) / ((cy - top) if y < cy else (bottom - cy))
+            w = rx * max(0, 1 - abs(yy) ** 2.4) ** 0.45
+            pts.append((cx + f * w, y))
+        cuts = sorted(rng.sample(range(4, 27), 2))
+        for a, b in ((0, cuts[0]), (cuts[0] + 3, cuts[1]), (cuts[1] + 3, 30)):
+            if b - a >= 3:
+                pen.line(pts[a:b + 1], rib, 5)
+    pen.line(outline, line, 9, closed=True)
 
-    # Stem, curling over to his right like the tuft it replaces.
-    stem_pts = [(842, 254), (840, 200), (846, 160), (862, 128), (888, 104), (918, 96), (942, 108), (946, 128),
-                (928, 132), (908, 134), (892, 150), (884, 178), (886, 214), (892, 256)]
-    pen.shape(wobble(stem_pts, rng, 1.5), stem, width=9)
-    pen.line([(866, 240), (862, 190), (872, 154)], stem_dark, 6)
-    pen.ellipse(906, 112, 7, 5, (178, 104, 60, 255))
+    # Stem, leaning over to his right.
+    stem_pts = bezier([(868, 214), (864, 168), (866, 126), (890, 96), (902, 82), (930, 76), (944, 90),
+                       (954, 100), (946, 118), (930, 118), (914, 120), (904, 140), (908, 176),
+                       (910, 196), (914, 210), (916, 222)], 10)
+    pen.shape(wobble(stem_pts, 5, 1.2), stem, line, 8)
+    pen.line([(882, 200), (880, 160), (890, 128)], (112, 66, 40, 255), 5)
 
-    # Eyes: carved angry sockets with a white eye and black pupil in each.
-    for n, (ex, ey) in enumerate(EYES):
-        inner = 1 if n == 0 else -1   # Toward his nose.
-        sx = ex + inner * 6
-        # Socket: a rounded slab whose top slopes down toward the middle.
-        sock = []
-        for i in range(48):
-            a = 2 * math.pi * i / 48
-            x, y = math.cos(a), math.sin(a)
-            rx, ry = 104, 78
-            px, py = sx + x * rx, ey + 4 + y * ry
-            if y < 0:
-                # Brow: the top flattens and tilts, lowest at the inner corner.
-                py = ey - 66 + 40 * (x * inner + 1) / 2 + (1 + y) * 18
-                py = max(py, ey + 4 + y * ry)
-            sock.append((px, py))
-        pen.shape(wobble(sock, rng, 2), carved, width=9)
-        # Eye: round below, cut flat by the brow above.
-        eye = []
-        for i in range(48):
-            a = 2 * math.pi * i / 48
-            x, y = math.cos(a), math.sin(a)
-            px, py = ex + x * 72, ey + 6 + y * 60
-            if y < 0:
-                py = max(py, ey - 54 + 22 * (x * inner + 1) / 2)
-            eye.append((px, py))
-        pen.shape(eye, (252, 250, 244, 255), width=7)
-        pen.ellipse(ex, ey + 8, 38, 38, (8, 6, 6, 255))
-        # A brow crease carved into the skin above the socket.
-        pen.line([(sx - 92 * inner, ey - 82), (sx - 30 * inner, ey - 70), (sx + 50 * inner, ey - 44)], rib, 7)
+    # Eyes (over the grin's corners): carved angry sockets, each with a white eye and a big black pupil sitting high in it.
+    # Grin: wide and carved, jagged teeth top and bottom, the top row meeting the bottom along a dark line.
+    mx, half = 902, 232
 
-    # Grin: a wide carved mouth, smiling up at the corners, with jagged teeth top and bottom.
-    mx, mhalf = 900, 200
+    def mtop(t):
+        return 628 - 40 * (2 * t - 1) ** 2 + 6 * math.sin(t * 9)
 
-    def mouth_top(t):
-        return 650 - 46 * (2 * t - 1) ** 2
+    def mbot(t):
+        return 836 - 130 * (2 * t - 1) ** 2
 
-    def mouth_bottom(t):
-        return 794 - 150 * (2 * t - 1) ** 2
-
-    mouth = [(mx - mhalf + 2 * mhalf * i / 40, mouth_top(i / 40)) for i in range(41)]
-    mouth += [(mx - mhalf + 2 * mhalf * i / 40, mouth_bottom(i / 40)) for i in range(40, -1, -1)]
-    pen.shape(wobble(mouth, rng, 2), carved, width=9)
-    n, edge = 8, 0.86
+    mouth = [(mx - half + 2 * half * i / 40, mtop(i / 40)) for i in range(41)]
+    mouth += [(mx - half + 2 * half * i / 40, mbot(i / 40)) for i in range(40, -1, -1)]
+    mouth = wobble(mouth, 21, 2.0)
+    pen.shape(mouth, carved, line, 9)
     upper, lower = [], []
-    for i in range(n * 2 + 1):
-        t = 0.5 + (i / (n * 2) - 0.5) * edge
-        x = mx - mhalf + 2 * mhalf * t
-        gap = mouth_bottom(t) - mouth_top(t)
-        upper.append((x, mouth_top(t) + gap * (0.08 + (0.22 if i % 2 else 0))))
-        lower.append((x, mouth_bottom(t) - gap * (0.08 + (0 if i % 2 else 0.2))))
-    pen.shape(upper + lower[::-1], flesh, outline=(150, 72, 30, 255), width=6)
-    # Where his top teeth meet the bottom ones.
+    teeth = 7
+    for i in range(teeth * 2 + 1):
+        t = 0.06 + 0.88 * i / (teeth * 2)
+        x = mx - half + 2 * half * t
+        gap = mbot(t) - mtop(t)
+        upper.append((x, mtop(t) + gap * (0.07 if i % 2 == 0 else 0.28)))
+    for i in range(teeth * 2 - 1):
+        t = 0.1 + 0.8 * i / (teeth * 2 - 2)
+        x = mx - half + 2 * half * t
+        gap = mbot(t) - mtop(t)
+        lower.append((x, mbot(t) - gap * (0.07 if i % 2 == 0 else 0.26)))
+    tan = upper + [(mx + half * 0.86, mbot(0.93) - (mbot(0.93) - mtop(0.93)) * 0.3)] + lower[::-1] + \
+        [(mx - half * 0.86, mbot(0.07) - (mbot(0.07) - mtop(0.07)) * 0.3)]
+    pen.shape(tan, flesh, flesh_line, 6)
     seam = []
-    for i in range(21):
-        t = 0.5 + (i / 20 - 0.5) * 0.78
-        seam.append((mx - mhalf + 2 * mhalf * t, (mouth_top(t) + mouth_bottom(t)) / 2 + 6))
-    pen.line(seam, (170, 96, 46, 255), 5)
+    for i in range(31):
+        t = 0.1 + 0.8 * i / 30
+        seam.append((mx - half + 2 * half * t, mtop(t) + (mbot(t) - mtop(t)) * 0.42 + 4))
+    pen.line(seam, (70, 38, 22, 255), 6)
 
-    out = without_body(classic)
+    for n, (ex, ey) in enumerate(EYES):
+        s = -1 if n == 0 else 1   # Outward.
+        prx, pry = 50, 56         # The pupil, centred on the eye seed.
+
+        def brow(x, lift, slope):
+            # Slopes down toward his nose; the eye's own brow stays clear of the top of the pupil.
+            d = (x - ex) * s
+            return ey - pry - lift - slope * d
+
+        def eye_shape(grow_x, grow_y, lift, slope=0.45):
+            pts = []
+            for i in range(96):
+                a = 2 * math.pi * i / 96
+                x = ex + 8 * s + math.cos(a) * (68 + grow_x)
+                y = ey + 8 + math.sin(a) * (74 + grow_y)
+                pts.append((x, max(y, brow(x, lift, slope))))
+            return pts
+
+        # Socket: the eye's shape carved bigger, its angry top edge higher.
+        sock = wobble(eye_shape(54, 34, 36, 0.8), 11 + n, 1.5)
+        pen.shape(sock, carved, line, 9)
+        pen.line(wobble(eye_shape(38, 22, 26, 0.68), 13 + n, 1.0), carved_dark, 5, closed=True)
+        pen.shape(eye_shape(0, 0, 16), white, (40, 20, 12, 255), 6)
+        pen.fill([(ex + math.cos(a) * prx, ey + math.sin(a) * pry) for a in [2 * math.pi * i / 72 for i in range(72)]], black)
+
+    out = arms_and_ears(*PUMPKIN_CUT, 40)
     out.alpha_composite(pen.done())
     return out
 

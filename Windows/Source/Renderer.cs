@@ -106,8 +106,8 @@ namespace OnkeyDesktopPet
         public Color LidColor = Color.FromArgb(160, 84, 51);
         private static readonly Point[] EyeSeeds = { new Point(753, 525), new Point(1056, 512) };
 
-        // lidSample: sprite pixels to take his eyelid colour from (a patch of skin above his eyes).
-        public OnkeyRenderer(string spritePath, Rectangle lidSample)
+        // The skin says which pixels his eyelid colour comes from and where his arms come out.
+        public OnkeyRenderer(string spritePath, Skin skin)
         {
             using (Image original = Image.FromFile(spritePath))
             using (Bitmap source = new Bitmap((int)SourceWidth, (int)SourceHeight, PixelFormat.Format32bppPArgb))
@@ -140,14 +140,14 @@ namespace OnkeyDesktopPet
                     h.DrawImageUnscaled(source, 0, 0);
                 }
             }
-            blankEyedHead = ErasePupils(head, lidSample);
+            blankEyedHead = ErasePupils(head, skin.LidSample);
             // The body is the drawing minus each arm from just outside his sides.
             using (GraphicsPath armsPath = new GraphicsPath())
             using (Bitmap whole = new Bitmap((int)SourceWidth, (int)SourceHeight, PixelFormat.Format32bppPArgb))
             using (Bitmap wholeBlank = new Bitmap((int)SourceWidth, (int)SourceHeight, PixelFormat.Format32bppPArgb))
             {
-                armsPath.AddPolygon(ArmSpec.LeftCut);
-                armsPath.AddPolygon(ArmSpec.RightCut);
+                armsPath.AddPolygon(ArmSpec.LeftCut(skin.BodyLeft));
+                armsPath.AddPolygon(ArmSpec.RightCut(skin.BodyRight));
                 using (Graphics g = Graphics.FromImage(whole))
                 {
                     g.Clear(Color.Transparent);

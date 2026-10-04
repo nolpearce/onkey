@@ -73,7 +73,11 @@ namespace OnkeyDesktopPet
             if (IsReleaseFolder(appFolder)) TidyOldInstall();
             string sprite = Path.Combine(assetFolder, "Onkey.png");
             if (!File.Exists(sprite)) throw new FileNotFoundException("Onkey's picture is missing from " + assetFolder + ". Download him again from github.com/nolpearce/onkey.", sprite);
-            if (!WearSkin(Skin.Find(Settings.Get("skin")))) Renderer = new OnkeyRenderer(sprite, Skin.Classic.LidSample);
+            if (!WearSkin(Skin.Find(Settings.Get("skin"))))
+            {
+                Renderer = new OnkeyRenderer(sprite, Skin.Classic);
+                Settings.Set("skin", Skin.Classic.Id);   // So choosing the skin again retries it.
+            }
             string soundPath = Path.Combine(assetFolder, Path.Combine("Sounds", "oooo.wav"));
             if (File.Exists(soundPath))
             {
@@ -185,7 +189,7 @@ namespace OnkeyDesktopPet
             try
             {
                 if (!File.Exists(path)) throw new FileNotFoundException("No picture for the " + skin.Name + " skin", path);
-                next = new OnkeyRenderer(path, skin.LidSample);
+                next = new OnkeyRenderer(path, skin);
             }
             catch (Exception ex) { Log.Error("Loading the " + skin.Name + " skin", ex); return false; }
             OnkeyRenderer old = Renderer;

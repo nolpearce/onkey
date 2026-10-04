@@ -39,10 +39,17 @@ namespace OnkeyDesktopPet
         public static readonly ArmSpec[] Both = { Left, Right };
 
         // What's cut out of the drawing to make room for each arm (the rest is his body).
-        public static readonly PointF[] LeftCut = { new PointF(0, 600), new PointF(380, 600), new PointF(380, 703),
-            new PointF(606, 703), new PointF(606, 887), new PointF(0, 887) };
-        public static readonly PointF[] RightCut = { new PointF(1774, 600), new PointF(1394, 600), new PointF(1394, 713),
-            new PointF(1150, 713), new PointF(1150, 887), new PointF(1774, 887) };
+        // Below his ears, everything left of `left` and right of `right` (606 and 1150 on the classic skin).
+        public static PointF[] LeftCut(float left)
+        {
+            return new PointF[] { new PointF(0, 600), new PointF(380, 600), new PointF(380, 703),
+                new PointF(left, 703), new PointF(left, 887), new PointF(0, 887) };
+        }
+        public static PointF[] RightCut(float right)
+        {
+            return new PointF[] { new PointF(1774, 600), new PointF(1394, 600), new PointF(1394, 713),
+                new PointF(right, 713), new PointF(right, 887), new PointF(1774, 887) };
+        }
     }
 
     // Where the wrist is and which way the hand points (radians, y-down).

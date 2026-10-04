@@ -29,10 +29,15 @@ struct ArmSpec {
     static let both = [left, right]
 
     // What's cut out of the drawing to make room for each arm (the rest is his body).
-    static let leftCut: [CGPoint] = [CGPoint(x: 0, y: 600), CGPoint(x: 380, y: 600), CGPoint(x: 380, y: 703),
-                                     CGPoint(x: 606, y: 703), CGPoint(x: 606, y: 887), CGPoint(x: 0, y: 887)]
-    static let rightCut: [CGPoint] = [CGPoint(x: 1774, y: 600), CGPoint(x: 1394, y: 600), CGPoint(x: 1394, y: 713),
-                                      CGPoint(x: 1150, y: 713), CGPoint(x: 1150, y: 887), CGPoint(x: 1774, y: 887)]
+    // Below his ears, everything left of `left` and right of `right` (606 and 1150 on the classic skin).
+    static func leftCut(_ left: CGFloat) -> [CGPoint] {
+        [CGPoint(x: 0, y: 600), CGPoint(x: 380, y: 600), CGPoint(x: 380, y: 703),
+         CGPoint(x: left, y: 703), CGPoint(x: left, y: 887), CGPoint(x: 0, y: 887)]
+    }
+    static func rightCut(_ right: CGFloat) -> [CGPoint] {
+        [CGPoint(x: 1774, y: 600), CGPoint(x: 1394, y: 600), CGPoint(x: 1394, y: 713),
+         CGPoint(x: right, y: 713), CGPoint(x: right, y: 887), CGPoint(x: 1774, y: 887)]
+    }
 }
 
 // Where the wrist is and which way the hand points (radians, y-down).

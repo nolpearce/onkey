@@ -61,8 +61,8 @@ final class OnkeyRenderer {
     let eyeInteriors: [Cutout]
     let lidColor: CGColor
 
-    // lidSample: sprite pixels to take his eyelid colour from (a patch of skin above his eyes).
-    init?(spriteURL: URL, lidSample: CGRect = Skin.classic.lidSample) {
+    // The skin says which pixels his eyelid colour comes from and where his arms come out.
+    init?(spriteURL: URL, skin: Skin = .classic) {
         guard let src = CGImageSourceCreateWithURL(spriteURL as CFURL, nil),
               let sprite = CGImageSourceCreateImageAtIndex(src, 0, nil) else { return nil }
         let left = CGMutablePath()
@@ -85,14 +85,14 @@ final class OnkeyRenderer {
               let r = Self.cut(sprite, right, evenOdd: false),
               let h = Self.cut(sprite, everything, evenOdd: true) else { return nil }
         leftArm = l; rightArm = r; head = h
-        guard let eyes = Self.erasePupils(h, lidSample: lidSample) else { return nil }
+        guard let eyes = Self.erasePupils(h, lidSample: skin.lidSample) else { return nil }
         blankEyedHead = eyes.head; pupils = eyes.pupils
         eyeInteriors = eyes.interiors; lidColor = eyes.lidColor
         // The body is the drawing minus each arm from just outside his sides.
         let bodyPath = CGMutablePath()
         bodyPath.addRect(CGRect(origin: .zero, size: Self.source))
-        bodyPath.addLines(between: ArmSpec.leftCut); bodyPath.closeSubpath()
-        bodyPath.addLines(between: ArmSpec.rightCut); bodyPath.closeSubpath()
+        bodyPath.addLines(between: ArmSpec.leftCut(skin.bodyLeft)); bodyPath.closeSubpath()
+        bodyPath.addLines(between: ArmSpec.rightCut(skin.bodyRight)); bodyPath.closeSubpath()
         guard let wholeBlank = Self.compose([blankEyedHead, l, r]),
               let b = Self.cut(sprite, bodyPath, evenOdd: true),
               let bb = Self.cut(wholeBlank, bodyPath, evenOdd: true) else { return nil }

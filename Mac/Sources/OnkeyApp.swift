@@ -59,6 +59,7 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
                 return
             }
             renderer = r
+            defaults.set(Skin.classic.id, forKey: Key.skin)   // So choosing the skin again retries it.
         }
         let soundURL = folder.appendingPathComponent("Sounds/oooo.wav")
         baseSound = NSSound(contentsOf: soundURL, byReference: false)
@@ -150,7 +151,7 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
     // leaves him as he was.
     @discardableResult private func wear(_ skin: Skin) -> Bool {
         let url = Self.assetFolder().appendingPathComponent(skin.file)
-        guard let r = OnkeyRenderer(spriteURL: url, lidSample: skin.lidSample) else {
+        guard let r = OnkeyRenderer(spriteURL: url, skin: skin) else {
             Log.warn("Couldn't load the \(skin.name) skin from \(url.path)")
             return false
         }
