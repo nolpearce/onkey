@@ -1,4 +1,4 @@
-ONKEY DESKTOP PET - VERSION 4.6.0 - WINDOWS
+ONKEY DESKTOP PET - VERSION 4.7.0 - WINDOWS
 
 START
 1. Open Onkey-Windows-Setup.exe. Windows may say it protected your PC
@@ -24,9 +24,10 @@ SETTINGS PANEL (click the tray icon)
   Sound           on/off, how often, volume, and Say oooo now. His mouth
                   opens while he makes his sound. Windows plays one sound at
                   a time, so a new "oooo" cuts off the last one.
-  Look            size, how see-through he is, in front of windows or on
-                  the desktop behind them, whether he stays over full-screen
-                  apps (videos, games), eyes that watch your cursor, blinking
+  Look            skin (Classic or Pumpkin), size, how see-through he is,
+                  in front of windows or on the desktop behind them,
+                  whether he stays over full-screen apps (videos, games),
+                  eyes that watch your cursor, blinking
   Updates         Opening this tab looks for a newer Onkey right there.
                   When there is one, it shows what's new; choose "Update and
                   restart" and Onkey downloads it (you see the progress),

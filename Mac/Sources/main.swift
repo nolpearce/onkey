@@ -7,7 +7,8 @@ import AVFoundation
 if let i = CommandLine.arguments.firstIndex(of: "--export"), i + 1 < CommandLine.arguments.count {
     let out = URL(fileURLWithPath: CommandLine.arguments[i + 1])
     let sprite = URL(fileURLWithPath: CommandLine.arguments.count > i + 2 ? CommandLine.arguments[i + 2] : "Onkey.png")
-    guard let r = OnkeyRenderer(spriteURL: sprite) else { print("Could not load \(sprite.path)"); exit(1) }
+    let skin = Skin.all.first { sprite.path.hasSuffix($0.file) } ?? .classic
+    guard let r = OnkeyRenderer(spriteURL: sprite, lidSample: skin.lidSample) else { print("Could not load \(sprite.path)"); exit(1) }
     try? FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
     func write(_ f: RenderedFrame?, _ name: String) {
         guard let f, let dest = CGImageDestinationCreateWithURL(out.appendingPathComponent(name) as CFURL,

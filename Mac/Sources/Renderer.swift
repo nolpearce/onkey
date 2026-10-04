@@ -61,7 +61,8 @@ final class OnkeyRenderer {
     let eyeInteriors: [Cutout]
     let lidColor: CGColor
 
-    init?(spriteURL: URL) {
+    // lidSample: sprite pixels to take his eyelid colour from (a patch of skin above his eyes).
+    init?(spriteURL: URL, lidSample: CGRect = Skin.classic.lidSample) {
         guard let src = CGImageSourceCreateWithURL(spriteURL as CFURL, nil),
               let sprite = CGImageSourceCreateImageAtIndex(src, 0, nil) else { return nil }
         let left = CGMutablePath()
@@ -84,7 +85,7 @@ final class OnkeyRenderer {
               let r = Self.cut(sprite, right, evenOdd: false),
               let h = Self.cut(sprite, everything, evenOdd: true) else { return nil }
         leftArm = l; rightArm = r; head = h
-        guard let eyes = Self.erasePupils(h) else { return nil }
+        guard let eyes = Self.erasePupils(h, lidSample: lidSample) else { return nil }
         blankEyedHead = eyes.head; pupils = eyes.pupils
         eyeInteriors = eyes.interiors; lidColor = eyes.lidColor
         // The body is the drawing minus each arm from just outside his sides.
@@ -145,7 +146,7 @@ final class OnkeyRenderer {
     // Flood-fills each pupil (and its grey anti-aliased rim) with white, stopping at
     // the white ring inside the eye outline, and keeps what was removed as black ink
     // so the moving pupils keep their hand-drawn edges. Seeds are inside each pupil.
-    private static func erasePupils(_ head: CGImage)
+    private static func erasePupils(_ head: CGImage, lidSample: CGRect)
         -> (head: CGImage, pupils: [Cutout], interiors: [Cutout], lidColor: CGColor)? {
         let w = Int(source.width), h = Int(source.height)
         guard let ctx = flippedContext(width: w, height: h),
@@ -195,9 +196,9 @@ final class OnkeyRenderer {
             guard ink.count > 1000, let interior = Cutout(ink: ink) else { return nil }
             interiors.append(interior)
         }
-        // Average skin colour in a patch of forehead above the left eye.
+        // Average skin colour in the patch (forehead above the left eye, on the classic skin).
         var rgb = [0, 0, 0], samples = 0
-        for y in 405..<415 { for x in 748..<758 {
+        for y in Int(lidSample.minY)..<Int(lidSample.maxY) { for x in Int(lidSample.minX)..<Int(lidSample.maxX) {
             let p = data + y * stride + x * 4
             guard p[3] > 250 else { continue }
             rgb[0] += Int(p[0]); rgb[1] += Int(p[1]); rgb[2] += Int(p[2]); samples += 1

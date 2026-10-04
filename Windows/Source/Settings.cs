@@ -28,7 +28,7 @@ namespace OnkeyDesktopPet
             path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Onkey", "settings.txt");
             string[] defaults = {
                 "zone=anywhere", "chase=5", "speed=42", "soundOn=true", "soundGap=90", "volume=1",
-                "size=1", "opacity=1", "layer=above", "overFullScreen=false", "draggable=false", "watchCursor=true", "blink=true", "count=1", "dance=false", "checkUpdates=true", "floppyArms=true", "sketchy=true" };
+                "size=1", "opacity=1", "layer=above", "overFullScreen=false", "draggable=false", "watchCursor=true", "blink=true", "count=1", "dance=false", "checkUpdates=true", "floppyArms=true", "sketchy=true", "skin=classic" };
             foreach (string line in defaults) Parse(line);
             try { if (File.Exists(path)) foreach (string line in File.ReadAllLines(path)) Parse(line); }
             catch (Exception ex) { Log.Error("Reading settings", ex); /* Unreadable settings just mean the defaults. */ }

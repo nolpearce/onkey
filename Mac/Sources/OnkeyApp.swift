@@ -4,7 +4,9 @@ import ServiceManagement
 
 final class OnkeyApp: NSObject, NSApplicationDelegate {
     let defaults = UserDefaults.standard
+    // Draws him in the skin he's wearing; replaced when the skin changes.
     private(set) var renderer: OnkeyRenderer!
+    private(set) var skin = Skin.classic
     private var statusItem: NSStatusItem!
     private var pauseItem: NSMenuItem!
     private var updateItem: NSMenuItem!
@@ -47,15 +49,17 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
             Key.zone: "anywhere", Key.chase: 5, Key.speed: 42.0,
             Key.soundOn: true, Key.soundGap: 90.0, Key.volume: 1.0,
             Key.size: 1.0, Key.opacity: 1.0, Key.layer: "above", Key.overFullScreen: true, Key.draggable: false, Key.watchCursor: true, Key.blink: true,
-            Key.count: 1, Key.dance: false, Key.checkUpdates: true, Key.floppyArms: true, Key.sketchy: true,
+            Key.count: 1, Key.dance: false, Key.checkUpdates: true, Key.floppyArms: true, Key.sketchy: true, Key.skin: "classic",
         ])
         prefs = Prefs(defaults)
         let folder = Self.assetFolder()
-        guard let r = OnkeyRenderer(spriteURL: folder.appendingPathComponent("Onkey.png")) else {
-            fail("Could not load Onkey.png from \(folder.path).")
-            return
+        if !wear(Skin.find(defaults.string(forKey: Key.skin))) {
+            guard let r = OnkeyRenderer(spriteURL: folder.appendingPathComponent("Onkey.png")) else {
+                fail("Could not load Onkey.png from \(folder.path).")
+                return
+            }
+            renderer = r
         }
-        renderer = r
         let soundURL = folder.appendingPathComponent("Sounds/oooo.wav")
         baseSound = NSSound(contentsOf: soundURL, byReference: false)
         if baseSound == nil { Log.warn("Couldn't load his sound from \(soundURL.path)") }
@@ -141,6 +145,19 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
     }
 
     // MARK: Frames
+
+    // Loads a skin's picture and draws him in it from now on. A missing or broken picture
+    // leaves him as he was.
+    @discardableResult private func wear(_ skin: Skin) -> Bool {
+        let url = Self.assetFolder().appendingPathComponent(skin.file)
+        guard let r = OnkeyRenderer(spriteURL: url, lidSample: skin.lidSample) else {
+            Log.warn("Couldn't load the \(skin.name) skin from \(url.path)")
+            return false
+        }
+        renderer = r
+        self.skin = skin
+        return true
+    }
 
     private func renderFrames() {
         pixelScale = size * (pets.first?.window.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2)
@@ -251,6 +268,15 @@ final class OnkeyApp: NSObject, NSApplicationDelegate {
         case Key.size:
             renderFrames()
             pets.forEach { $0.resize(from: oldWindowSize) }
+        case Key.skin:
+            if wear(Skin.find(value as? String)) {
+                renderFrames()
+                pets.forEach { $0.framesChanged(); $0.updateFace(dt: 1) }
+                statusItem.button?.image = menuIcon()
+            } else {
+                defaults.set(skin.id, forKey: Key.skin)
+                prefs = Prefs(defaults)
+            }
         case Key.sketchy:
             pets.forEach { $0.framesChanged() }
         case Key.watchCursor:

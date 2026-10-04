@@ -7,7 +7,7 @@ enum Key {
     static let watchCursor = "watchCursor", blink = "blink"
     static let count = "count", dance = "dance"
     static let checkUpdates = "checkUpdates"
-    static let floppyArms = "floppyArms", sketchy = "sketchy"
+    static let floppyArms = "floppyArms", sketchy = "sketchy", skin = "skin"
     static let savedX = "savedX", savedY = "savedY"
 }
 

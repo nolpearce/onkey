@@ -51,9 +51,10 @@ jobs:
         shell: pwsh
         run: |
           $out = 'dist/Onkey-Windows'
-          New-Item -ItemType Directory -Force "$out/Assets/Sounds", "$out/Source" | Out-Null
+          New-Item -ItemType Directory -Force "$out/Assets/Sounds", "$out/Assets/Skins", "$out/Source" | Out-Null
           Copy-Item Windows/Onkey.exe, Windows/README.txt $out
           Copy-Item Assets/Onkey.png "$out/Assets"
+          Copy-Item Assets/Skins/*.png "$out/Assets/Skins"
           Copy-Item Assets/Sounds/oooo.wav, Assets/Sounds/README.txt "$out/Assets/Sounds"
           # Onkey 4.4.3 and older only install an update that has Start Onkey.vbs and
           # Source\*.cs, and start it with wscript, so the zip keeps both. The .vbs just

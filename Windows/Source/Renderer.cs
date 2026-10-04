@@ -106,7 +106,8 @@ namespace OnkeyDesktopPet
         public Color LidColor = Color.FromArgb(160, 84, 51);
         private static readonly Point[] EyeSeeds = { new Point(753, 525), new Point(1056, 512) };
 
-        public OnkeyRenderer(string spritePath)
+        // lidSample: sprite pixels to take his eyelid colour from (a patch of skin above his eyes).
+        public OnkeyRenderer(string spritePath, Rectangle lidSample)
         {
             using (Image original = Image.FromFile(spritePath))
             using (Bitmap source = new Bitmap((int)SourceWidth, (int)SourceHeight, PixelFormat.Format32bppPArgb))
@@ -139,7 +140,7 @@ namespace OnkeyDesktopPet
                     h.DrawImageUnscaled(source, 0, 0);
                 }
             }
-            blankEyedHead = ErasePupils(head);
+            blankEyedHead = ErasePupils(head, lidSample);
             // The body is the drawing minus each arm from just outside his sides.
             using (GraphicsPath armsPath = new GraphicsPath())
             using (Bitmap whole = new Bitmap((int)SourceWidth, (int)SourceHeight, PixelFormat.Format32bppPArgb))
@@ -206,7 +207,7 @@ namespace OnkeyDesktopPet
         // Flood-fills each pupil (and its grey anti-aliased rim) with white, stopping at
         // the white ring inside the eye outline, and keeps what was removed as ink so the
         // moving pupils keep their hand-drawn edges. Then finds the inside of each eye.
-        private Bitmap ErasePupils(Bitmap source)
+        private Bitmap ErasePupils(Bitmap source, Rectangle lidSample)
         {
             int w = source.Width, h = source.Height;
             byte[] px = Pixels.Read(source);
@@ -223,7 +224,7 @@ namespace OnkeyDesktopPet
                     px[i] = px[i + 1] = px[i + 2] = (byte)a;   // Premultiplied white.
                     return true;
                 }, xs, ys);
-                if (xs.Count < 1000) throw new InvalidDataException("Could not find Onkey's pupils in Onkey.png.");
+                if (xs.Count < 1000) throw new InvalidDataException("Could not find Onkey's pupils in his picture.");
                 Pupils[e] = new Cutout(xs, ys, alphas);
             }
             // With the pupils gone, each eye's inside is one light patch bounded by the dark
@@ -244,13 +245,13 @@ namespace OnkeyDesktopPet
                     alphas.Add((byte)Math.Min(255, (lightness - 60) * 255 / 50));
                     return true;
                 }, xs, ys);
-                if (xs.Count < 1000) throw new InvalidDataException("Could not find Onkey's eyes in Onkey.png.");
+                if (xs.Count < 1000) throw new InvalidDataException("Could not find Onkey's eyes in his picture.");
                 EyeInteriors[e] = new Cutout(xs, ys, alphas);
             }
-            // Average skin colour in a patch of forehead above the left eye.
+            // Average skin colour in the patch (forehead above the left eye, on the classic skin).
             int r = 0, gr = 0, b = 0, n = 0;
-            for (int y = 405; y < 415; y++)
-                for (int x = 748; x < 758; x++)
+            for (int y = lidSample.Top; y < lidSample.Bottom; y++)
+                for (int x = lidSample.Left; x < lidSample.Right; x++)
                 {
                     int i = (y * w + x) * 4;
                     if (px[i + 3] <= 250) continue;
