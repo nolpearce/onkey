@@ -82,6 +82,13 @@ def without_body(sprite):
     m.rectangle([605, 0, 1150, H], fill=255)
     m.rectangle([1150, 0, 1175, 703], fill=255)
     out.paste(clear, (0, 0), mask)
+    # His right ear reached under the cleared strip beside his head: mirror the ear's next few
+    # columns into it so no hard edge shows past the new head.
+    px = out.load()
+    src = sprite.load()
+    for y in range(430, 716):
+        for x in range(1150, 1176):
+            px[x, y] = src[2352 - x, y]
     return out
 
 
