@@ -1,4 +1,4 @@
-ONKEY DESKTOP PET - MAC - VERSION 4.6.0
+ONKEY DESKTOP PET - MAC - VERSION 4.7.0
 
 START
 Open Onkey from your Applications folder (or Launchpad / Spotlight).
@@ -18,9 +18,10 @@ close it.
                   and Bring Onkey to this screen
   Sound           on/off, how often, volume, and Say oooo now. His mouth
                   opens while he makes the sound.
-  Look            size, how see-through he is, in front of windows or on
-                  the desktop behind them, whether he stays over full-screen
-                  apps, eyes that watch your cursor, and blinking
+  Look            skin (Classic or Pumpkin), size, how see-through he is,
+                  in front of windows or on the desktop behind them,
+                  whether he stays over full-screen apps, eyes that watch
+                  your cursor, and blinking
   Updates         Opening this tab looks for a newer Onkey right there.
                   When there is one, it shows what's new; choose "Update and
                   restart" and Onkey downloads it (you see the progress),
@@ -64,7 +65,8 @@ SOURCES
   SettingsPanel.swift   the hand-drawn jungle settings drop-down (SwiftUI)
   Pet.swift             one Onkey: walking, eyes, blinks, mouth, bopping
   PetView.swift         draws one Onkey (body, pupils, lids, mouth)
-  Renderer.swift        draws his frames from Onkey.png
+  Renderer.swift        draws his frames from Onkey.png (or a skin's picture)
+  Skin.swift            the skins he can wear
   Settings.swift        setting names and cached values
   Updater.swift         finds and installs new releases from GitHub
   Log.swift             his log, crash capture and crash reports

@@ -48,6 +48,7 @@ Name: startup; Description: "Open Onkey when Windows starts"; GroupDescription: 
 Source: "Onkey.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "README.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\Assets\Onkey.png"; DestDir: "{app}\Assets"; Flags: ignoreversion
+Source: "..\Assets\Skins\*.png"; DestDir: "{app}\Assets\Skins"; Flags: ignoreversion
 Source: "..\Assets\Sounds\oooo.wav"; DestDir: "{app}\Assets\Sounds"; Flags: ignoreversion
 Source: "..\Assets\Sounds\README.txt"; DestDir: "{app}\Assets\Sounds"; Flags: ignoreversion
 

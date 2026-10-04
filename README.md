@@ -22,7 +22,7 @@ This builds `Onkey.app`, installs it in `/Applications` and launches it. Click t
 
 - **Moves**: how many Onkeys, where he roams, how often he walks to your mouse, walking speed, floppy arms that dangle and swing when you carry him
 - **Sound**: on/off, how often, volume, play now. His mouth opens while he makes the sound
-- **Look**: size, see-through, in front of windows or on the desktop, staying over full-screen apps, eyes that watch your cursor, blinking, sketchy arms whose lines wiggle like a drawing
+- **Look**: skins (Classic, or a carved Pumpkin head for Halloween), size, see-through, in front of windows or on the desktop, staying over full-screen apps, eyes that watch your cursor, blinking, sketchy arms whose lines wiggle like a drawing
 - **Updates**: finds a newer release here on GitHub, then downloads it and restarts Onkey with your settings kept. He also checks on his own every few hours (you can turn that off). Open at login
 
 Dancing bops every Onkey (squashes him down 15%) on the beat of whatever's playing. Right-click the head for a short menu.
@@ -39,6 +39,7 @@ Download `Onkey-Windows-Setup.exe` from [Releases](https://github.com/nolpearce/
 
 ```
 Assets/      Onkey.png (the sprite both versions draw from), AppIcon.png (the Mac app icon), Sounds/, Preview.gif
+Assets/Skins/  the other skins' sprites, drawn to fit Onkey.png's eyes and arms (make-skins.py)
 Assets/Installer/  the jungle pictures for the Mac icon, DMG window and Windows installer (make-art.py)
 Mac/         Sources/*.swift, build.sh (builds and installs Onkey.app), make-dmg.sh, README.txt
 Windows/     Source/*.cs, build.cmd (builds Onkey.exe), installer.iss, Onkey.ico, README.txt

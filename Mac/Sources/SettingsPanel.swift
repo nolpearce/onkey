@@ -8,7 +8,7 @@ import SwiftUI
 // and every change takes effect straight away. It closes when you click anywhere else.
 // The Windows version in Windows/Source/SettingsPanel.cs looks the same.
 final class SettingsPanel {
-    static let size = CGSize(width: 380, height: 616)
+    static let size = CGSize(width: 380, height: 680)
     private let panel: Panel
     private let model: SettingsModel
     private var clickMonitor: Any?
@@ -100,12 +100,19 @@ final class SettingsPanel {
 
 final class SettingsModel: ObservableObject {
     unowned let app: OnkeyApp
-    let head: NSImage
     @Published var tab = 0
+    private var heads: [String: NSImage] = [:]
 
     init(app: OnkeyApp) {
         self.app = app
-        head = app.headImage(height: 40)
+    }
+
+    // His head at the top of the panel, in the skin he's wearing.
+    var head: NSImage {
+        if let head = heads[app.skin.id] { return head }
+        let head = app.headImage(height: 40)
+        heads[app.skin.id] = head
+        return head
     }
 
     func bool(_ key: String) -> Bool { app.defaults.bool(forKey: key) }
@@ -607,6 +614,9 @@ struct LookPage: View {
         let opacity = model.number(Key.opacity)
         let desktop = model.string(Key.layer) == "desktop"
         VStack(alignment: .leading, spacing: 8) {
+            StackedRow(label: "Skin", caption: model.app.skin.caption) {
+                Chips(options: Skin.all.map { (name: $0.name, value: $0.id) }, selected: model.app.skin.id) { model.set(Key.skin, $0) }
+            }
             StackedRow(label: "Size", caption: percent(model.number(Key.size))) {
                 // Re-rendering every frame is too slow to follow the mouse, so size waits for the drop.
                 VineSlider("Size", value: model.number(Key.size), range: 0.4...3, onDrop: true, spoken: percent(model.number(Key.size))) { model.set(Key.size, ($0 * 100).rounded() / 100) }

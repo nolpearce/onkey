@@ -190,6 +190,8 @@ final class PetView: NSView {
             lid.clip.frame = f
             lid.ink.frame = f
             lid.clip.mask?.frame = CGRect(origin: .zero, size: f.size)
+            // Set every time, since a new skin brings new eyes.
+            if i < interiors.count { lid.clip.mask?.contents = interiors[i].image }
             lid.skin.fillColor = color
             // The lid's lower edge sags in the middle like a drawn eyelid. Layer y runs upward.
             let sag = h * 0.14

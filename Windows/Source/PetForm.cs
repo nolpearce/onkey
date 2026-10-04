@@ -380,7 +380,7 @@ namespace OnkeyDesktopPet
                                                             p.Rect.Width * k, p.Rect.Height * k));
                     }
                 for (int i = 0; i < 2; i++) Features.DrawLid(g, app.Renderer.EyeInteriors[i], Closure(i), app.Renderer.LidColor, i);
-                Features.DrawMouth(g, (float)mouthOpen);
+                if (app.Skin.Mouth) Features.DrawMouth(g, (float)mouthOpen);
             }
             surface.Show(Handle, x, y, alpha);
             shownFrame = current; shownAlpha = alpha; shownX = x; shownY = y;

@@ -14,7 +14,7 @@ namespace OnkeyDesktopPet
     // and every change takes effect straight away. It closes when you click anywhere else.
     internal sealed class SettingsPanel : Form
     {
-        public const float PageWidth = 380, PageHeight = 616;
+        public const float PageWidth = 380, PageHeight = 680;
         // The card the settings sit on, and the columns inside it.
         public const float CardLeft = 12, CardTop = 124, CardRight = PageWidth - 12, CardBottom = PageHeight - 12;
         public const float LabelLeft = 30, ControlRight = CardRight - 18;
@@ -28,6 +28,7 @@ namespace OnkeyDesktopPet
         private int current;
         private Widget pressed, hovered;
         private Bitmap backdrop, head;
+        private string headSkin;   // The skin his head at the top was drawn in.
         private readonly Timer animator = new Timer();
         private readonly System.Diagnostics.Stopwatch clock = new System.Diagnostics.Stopwatch();
         private double fade, fadeTarget = 1;   // 0 hidden ... 1 fully shown.
@@ -66,6 +67,7 @@ namespace OnkeyDesktopPet
             ChipFont = new Font(hand, 13, FontStyle.Bold, GraphicsUnit.Pixel);
             SmallFont = new Font(hand, 12.5f, FontStyle.Regular, GraphicsUnit.Pixel);
             head = app.RenderHead((int)Math.Round(40 * scale));
+            headSkin = app.Skin.Id;
 
             BuildPages();
             app.SettingsChanged += Changed;
@@ -170,7 +172,22 @@ namespace OnkeyDesktopPet
             base.Dispose(disposing);
         }
 
-        private void Changed() { if (!IsDisposed) Invalidate(); }
+        private void Changed()
+        {
+            if (IsDisposed) return;
+            if (headSkin != app.Skin.Id)
+            {
+                // Redrawn in place, since the update card shows the same picture.
+                using (Bitmap fresh = app.RenderHead(head.Width))
+                using (Graphics g = Graphics.FromImage(head))
+                {
+                    g.CompositingMode = CompositingMode.SourceCopy;
+                    g.DrawImageUnscaled(fresh, 0, 0);
+                }
+                headSkin = app.Skin.Id;
+            }
+            Invalidate();
+        }
 
         // Pages
 
@@ -250,6 +267,9 @@ namespace OnkeyDesktopPet
             Full(sound, play);
 
             Page look = AddPage("Look");
+            string[] skins = new string[Skin.All.Length * 2];
+            for (int i = 0; i < Skin.All.Length; i++) { skins[i * 2] = Skin.All[i].Name; skins[i * 2 + 1] = Skin.All[i].Id; }
+            Stacked(look, "Skin", Choices("skin", skins), delegate { return app.Skin.Caption; });
             // Re-rendering every frame is too slow to follow the mouse, so size waits for the drop.
             Stacked(look, "Size", NumberSlider("size", 0.4, 3, true), delegate { return Percent(app.Settings.Number("size")); });
             Stacked(look, "See-through", NumberSlider("opacity", 0.2, 1, false), delegate

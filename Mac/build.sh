@@ -20,6 +20,8 @@ done
 lipo -create "$work/Onkey-arm64" "$work/Onkey-x86_64" -output "$app/Contents/MacOS/Onkey"
 mkdir -p "$app/Contents/Resources/Sounds"
 cp "$assets/Onkey.png" "$app/Contents/Resources/"
+mkdir -p "$app/Contents/Resources/Skins"
+cp "$assets"/Skins/*.png "$app/Contents/Resources/Skins/"
 cp "$assets/Sounds/oooo.wav" "$app/Contents/Resources/Sounds/"
 
 echo "Making icon..."
@@ -43,8 +45,8 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
     <key>CFBundleExecutable</key><string>Onkey</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleVersion</key><string>18</string>
-    <key>CFBundleShortVersionString</key><string>4.6.0</string>
+    <key>CFBundleVersion</key><string>19</string>
+    <key>CFBundleShortVersionString</key><string>4.7.0</string>
     <key>LSMinimumSystemVersion</key><string>13.0</string>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>

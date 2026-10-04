@@ -301,7 +301,7 @@ final class Pet {
         let t = ProcessInfo.processInfo.systemUptime - soundStart
         // t is infinite until the first sound plays; only index the clip while it's playing.
         let playing = t >= 0 && t < Double(envelope.count) / 60
-        let target = playing ? min(1, envelope[Int(t * 60)] * 1.25) : 0
+        let target = playing && app.skin.mouth ? min(1, envelope[Int(t * 60)] * 1.25) : 0
         mouthOpen += (target - mouthOpen) * (1 - exp(-dt * 25))
         if mouthOpen <= 0.02 && !mouthShown { return }
         mouthShown = mouthOpen > 0.02

@@ -23,7 +23,9 @@ namespace OnkeyDesktopPet
         public readonly Random Random = new Random();
         public readonly Stopwatch Wall = Stopwatch.StartNew();
         public readonly Settings Settings = new Settings();
-        public readonly OnkeyRenderer Renderer;
+        // Draws him in the skin he's wearing; replaced when the skin changes.
+        public OnkeyRenderer Renderer;
+        public Skin Skin = Skin.Classic;
         public readonly OnkeySound Sound;
         // The lowest opaque row of him at rest (points, unscaled): where his hands end.
         public float IdleBottom = OnkeyRenderer.CanvasHeight;
@@ -71,7 +73,11 @@ namespace OnkeyDesktopPet
             if (IsReleaseFolder(appFolder)) TidyOldInstall();
             string sprite = Path.Combine(assetFolder, "Onkey.png");
             if (!File.Exists(sprite)) throw new FileNotFoundException("Onkey's picture is missing from " + assetFolder + ". Download him again from github.com/nolpearce/onkey.", sprite);
-            Renderer = new OnkeyRenderer(sprite);
+            if (!WearSkin(Skin.Find(Settings.Get("skin"))))
+            {
+                Renderer = new OnkeyRenderer(sprite, Skin.Classic);
+                Settings.Set("skin", Skin.Classic.Id);   // So choosing the skin again retries it.
+            }
             string soundPath = Path.Combine(assetFolder, Path.Combine("Sounds", "oooo.wav"));
             if (File.Exists(soundPath))
             {
@@ -172,6 +178,25 @@ namespace OnkeyDesktopPet
                                          area.Top + Random.Next(Math.Max(1, area.Height - CanvasPixelsHigh)));
                 AddPet(origin, area);
             }
+        }
+
+        // Loads a skin's picture and draws him in it from now on. A missing or broken picture
+        // leaves him as he was.
+        private bool WearSkin(Skin skin)
+        {
+            string path = Path.Combine(assetFolder, skin.File);
+            OnkeyRenderer next;
+            try
+            {
+                if (!File.Exists(path)) throw new FileNotFoundException("No picture for the " + skin.Name + " skin", path);
+                next = new OnkeyRenderer(path, skin);
+            }
+            catch (Exception ex) { Log.Error("Loading the " + skin.Name + " skin", ex); return false; }
+            OnkeyRenderer old = Renderer;
+            Renderer = next;
+            Skin = skin;
+            if (old != null) old.Dispose();
+            return true;
         }
 
         public void RenderFrames()
@@ -296,6 +321,16 @@ namespace OnkeyDesktopPet
                     break;
                 case "watchCursor":
                     RenderFrames();
+                    break;
+                case "skin":
+                    if (WearSkin(Skin.Find(value)))
+                    {
+                        RenderFrames();
+                        Icon oldIcon = tray.Icon;
+                        tray.Icon = MakeTrayIcon();
+                        if (oldIcon != null) { Native.DestroyIcon(oldIcon.Handle); oldIcon.Dispose(); }
+                    }
+                    else Settings.Set("skin", Skin.Id);
                     break;
                 case "sketchy":
                     foreach (PetForm pet in pets) pet.FramesChanged();
